@@ -1,4 +1,4 @@
-# Installing mcp-ssh on Debian / Ubuntu
+# Installing better-ssh-mcp on Debian / Ubuntu
 
 ## 1. System dependencies
 
@@ -15,7 +15,7 @@ sudo apt install python3 python3-pip
 sudo apt install libfido2-1
 ```
 
-## 2. Install mcp-ssh
+## 2. Install better-ssh-mcp
 
 ### Recommended: uv tool (isolated, self-contained)
 
@@ -23,20 +23,20 @@ sudo apt install libfido2-1
 # Install uv if you don't already have it
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Install mcp-ssh into an isolated tool environment
-uv tool install mcp-ssh
+# Install better-ssh-mcp into an isolated tool environment
+uv tool install better-ssh-mcp
 ```
 
 ### Alternative: pip
 
 ```bash
-pip install --user mcp-ssh
+pip install --user better-ssh-mcp
 ```
 
 Verify the installation:
 
 ```bash
-mcp-ssh --version
+better-ssh-mcp --version
 ```
 
 ## 3. Configuration file
@@ -44,17 +44,17 @@ mcp-ssh --version
 Create the configuration directory and a `servers.toml` file:
 
 ```bash
-mkdir -p ~/.config/mcp-ssh
+mkdir -p ~/.config/better-ssh-mcp
 ```
 
-**`~/.config/mcp-ssh/servers.toml`** — example with two servers:
+**`~/.config/better-ssh-mcp/servers.toml`** — example with two servers:
 
 ```toml
 [settings]
-known_hosts_file       = "~/.local/share/mcp-ssh/known_hosts"
+known_hosts_file       = "~/.local/share/better-ssh-mcp/known_hosts"
 default_host_key_policy = "tofu"   # trust-on-first-use; use "strict" in production
-audit_log              = "~/.local/share/mcp-ssh/audit.jsonl"
-state_file             = "~/.local/share/mcp-ssh/state.json"
+audit_log              = "~/.local/share/better-ssh-mcp/audit.jsonl"
+state_file             = "~/.local/share/better-ssh-mcp/state.json"
 max_sessions           = 10
 keepalive_interval     = 30
 
@@ -88,8 +88,8 @@ Add the following block to your Claude Desktop configuration file.
 ```json
 {
   "mcpServers": {
-    "ssh": {
-      "command": "mcp-ssh",
+    "better-ssh-mcp": {
+      "command": "better-ssh-mcp",
       "args": [],
       "env": {}
     }
@@ -97,15 +97,15 @@ Add the following block to your Claude Desktop configuration file.
 }
 ```
 
-If you installed with `uv tool install`, the `mcp-ssh` binary is placed in
+If you installed with `uv tool install`, the `better-ssh-mcp` binary is placed in
 `~/.local/bin/` (added to `PATH` by the uv installer). If Claude Desktop cannot
 find it, use the full path:
 
 ```json
 {
   "mcpServers": {
-    "ssh": {
-      "command": "/home/YOUR_USER/.local/bin/mcp-ssh",
+    "better-ssh-mcp": {
+      "command": "/home/YOUR_USER/.local/bin/better-ssh-mcp",
       "args": [],
       "env": {}
     }
@@ -118,11 +118,11 @@ Restart Claude Desktop after editing the config file.
 ## Upgrading
 
 ```bash
-uv tool upgrade mcp-ssh
+uv tool upgrade better-ssh-mcp
 ```
 
 ## Uninstalling
 
 ```bash
-uv tool uninstall mcp-ssh
+uv tool uninstall better-ssh-mcp
 ```
