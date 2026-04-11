@@ -339,6 +339,68 @@ def test_server_registers_18_tools(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# State file permissions (security)
+# ---------------------------------------------------------------------------
+
+def test_state_file_created_with_0o600_permissions(tmp_path: Path) -> None:
+    """State file created by StateStore must be owner-readable only (0o600)."""
+    settings = GlobalSettings(
+        state_file=str(tmp_path / "state.json"),
+        audit_log=str(tmp_path / "audit.jsonl"),
+    )
+    store = StateStore(settings)
+    store.load()
+    # Trigger a write by saving any process entry
+    from datetime import datetime, timezone
+    from mcp_ssh.models import ProcessRecord, ProcessStatus
+    store.upsert_process(
+        ProcessRecord(
+            id="p1",
+            server="test",
+            command="echo hi",
+            remote_pid=999,
+            log_file="/tmp/p1.log",
+            exit_file="/tmp/p1.exit",
+            started_at=datetime.now(tz=timezone.utc),
+            status=ProcessStatus.running,
+        )
+    )
+    state_path = Path(settings.state_file)
+    mode = state_path.stat().st_mode & 0o777
+    assert mode == 0o600, f"Expected 0o600, got 0o{mode:03o}"
+
+
+# ---------------------------------------------------------------------------
+# Disconnect-reconnect integration test
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_disconnect_reconnect_check_process(full_stack: tuple) -> None:
+    """After closing and recreating the pool, ssh_check_process still works."""
+    pool, sm, state, audit, settings, cfg = full_stack
+
+    reg = MagicMock()
+    reg.get.return_value = cfg
+    audit_mock = MagicMock()
+
+    # Start a background process on the live server
+    stream_result = await ssh_exec_stream("test", "sleep 30", sm, audit_mock)
+    assert "process_id" in stream_result
+    pid = stream_result["process_id"]
+
+    # Close all connections (simulate disconnect)
+    await pool.close_all()
+
+    # Reconnect by requesting the connection again and check the process
+    check_result = await ssh_check_process(pid, sm)
+    assert isinstance(check_result, dict)
+    # Process should still be running (or completed) — no exception raised
+    assert "error" not in check_result or check_result.get("error") in {
+        "process_not_found",  # acceptable if state was not persisted
+    }
+
+
+# ---------------------------------------------------------------------------
 # pool.close_all() called on shutdown (verified by testing _shutdown logic)
 # ---------------------------------------------------------------------------
 

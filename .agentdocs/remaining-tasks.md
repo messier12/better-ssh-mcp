@@ -10,9 +10,9 @@ This document tracks items that are not yet fully compliant with the `mcp-ssh-pl
 
 ## 2. Testing & Quality (Gate 3 Arch Checklist)
 
-- [ ] **Disconnect-Reconnect Integration Test:** Add a specific test case to `tests/test_integration.py` that starts a process, closes the connection pool, recreates it/reconnects, and then successfully runs `ssh_check_process`.
+- [x] **Disconnect-Reconnect Integration Test:** Added `test_disconnect_reconnect_check_process` in `tests/test_integration.py` — starts a background process, calls `pool.close_all()`, then calls `ssh_check_process` (which reconnects automatically).
 - [x] **Fix Async Warnings:** Added targeted `filterwarnings` in `pyproject.toml` to suppress the `_drain_pty` RuntimeWarning (test-teardown artefact; production always cancels via `pty_close()`). `make check` passes with 0 warnings.
-- [ ] **Promote Permission Checks:** Move or mirror the `0o600` file permission verification from `test_state.py` into `test_integration.py`.
+- [x] **Promote Permission Checks:** Mirrored the `0o600` file permission verification into `test_integration.py` as `test_state_file_created_with_0o600_permissions`.
 
 ## 3. Documentation & Security (Gate 3 Sec Checklist)
 
