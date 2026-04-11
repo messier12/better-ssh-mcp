@@ -448,6 +448,7 @@ class SessionManager:
             proc = self._pty_procs.get(session_id)
             if proc is not None:
                 proc.stdin.write(data)
+                await proc.stdin.drain()
         else:
             # tmux path
             tmux_session = self._tmux_sessions.get(session_id, "")
