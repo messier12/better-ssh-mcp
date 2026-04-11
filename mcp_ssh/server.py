@@ -141,6 +141,8 @@ def _register_tools(mcp: Any, ctx: AppContext) -> None:
         ssh_start_pty as ssh_start_pty_fn,
     )
     from .tools.registry_tools import async_ssh_add_known_host
+    from .tools.scp_tools import ssh_get as ssh_get_fn
+    from .tools.scp_tools import ssh_put as ssh_put_fn
 
     # --- Registry tools (T3a) ---
 
@@ -319,6 +321,38 @@ def _register_tools(mcp: Any, ctx: AppContext) -> None:
         """Attach to an existing tmux-backed PTY session."""
         return await ssh_pty_attach_fn(
             session_id=session_id, session_manager=ctx.session_manager
+        )
+
+    # --- SCP tools ---
+
+    @mcp.tool()
+    async def ssh_get(  # type: ignore[return]
+        server: str,
+        remote_path: str,
+        local_path: str,
+        recurse: bool = False,
+        preserve: bool = False,
+    ) -> dict[str, Any]:
+        """Download a file or directory from a remote server to a local path."""
+        return await ssh_get_fn(
+            server=server, remote_path=remote_path, local_path=local_path,
+            recurse=recurse, preserve=preserve,
+            registry=ctx.registry, pool=ctx.pool, audit=ctx.audit,
+        )
+
+    @mcp.tool()
+    async def ssh_put(  # type: ignore[return]
+        server: str,
+        local_path: str,
+        remote_path: str,
+        recurse: bool = False,
+        preserve: bool = False,
+    ) -> dict[str, Any]:
+        """Upload a file or directory from a local path to a remote server."""
+        return await ssh_put_fn(
+            server=server, local_path=local_path, remote_path=remote_path,
+            recurse=recurse, preserve=preserve,
+            registry=ctx.registry, pool=ctx.pool, audit=ctx.audit,
         )
 
 
