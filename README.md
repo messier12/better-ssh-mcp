@@ -54,6 +54,7 @@ better-ssh-mcp --version
 
 | Document | Purpose |
 |---|---|
+| [FEATURES.md](FEATURES.md) | **Tool guide & audit documentation** — all tools explained, audit log format, filtering examples |
 | [INSTALL.md](INSTALL.md) | **Debian/Ubuntu setup** — system dependencies, uv tool, pip, Claude Desktop config |
 | [INSTALL-NIX.md](INSTALL-NIX.md) | **Nix setup** — flakes, Home Manager module, NixOS module, Claude Desktop path |
 | [CLAUDE.md](CLAUDE.md) | **Development guide** — project architecture, task graph, testing |
@@ -132,6 +133,8 @@ make check
 ## 📋 Available Tools
 
 All tools are exposed to Claude and other MCP clients:
+
+**See [FEATURES.md](FEATURES.md) for detailed documentation on each tool, audit logging, and filtering examples.**
 
 - `ssh_register_server` — Add a new server to the registry
 - `ssh_exec` — Run a command and wait for output
