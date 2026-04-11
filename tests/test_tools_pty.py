@@ -82,6 +82,26 @@ async def test_start_pty_session_cap_exceeded() -> None:
 
 
 @pytest.mark.asyncio
+async def test_start_pty_mcpssh_error() -> None:
+    sm = _make_session_manager()
+    sm.start_pty = AsyncMock(side_effect=McpSshError("generic ssh error"))
+    audit = _make_audit()
+    result = await ssh_start_pty("srv1", sm, audit)
+    assert result["error"] == "start_error"
+    audit.log.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_start_pty_unexpected_error() -> None:
+    sm = _make_session_manager()
+    sm.start_pty = AsyncMock(side_effect=RuntimeError("something unexpected"))
+    audit = _make_audit()
+    result = await ssh_start_pty("srv1", sm, audit)
+    assert result["error"] == "unexpected_error"
+    audit.log.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_start_pty_passes_cols_rows() -> None:
     sm = _make_session_manager()
     sm.start_pty = AsyncMock(return_value="sess-789")
@@ -117,6 +137,14 @@ async def test_pty_read_session_not_found() -> None:
     assert result["error"] == "session_not_found"
 
 
+@pytest.mark.asyncio
+async def test_pty_read_mcpssh_error() -> None:
+    sm = _make_session_manager()
+    sm.pty_read = AsyncMock(side_effect=McpSshError("io error"))
+    result = await ssh_pty_read("s1", sm)
+    assert result["error"] == "read_error"
+
+
 # ---------------------------------------------------------------------------
 # ssh_pty_write
 # ---------------------------------------------------------------------------
@@ -136,6 +164,14 @@ async def test_pty_write_session_not_found() -> None:
     sm.pty_write = AsyncMock(side_effect=SessionNotFound("nope"))
     result = await ssh_pty_write("gone", "data", sm)
     assert result["error"] == "session_not_found"
+
+
+@pytest.mark.asyncio
+async def test_pty_write_mcpssh_error() -> None:
+    sm = _make_session_manager()
+    sm.pty_write = AsyncMock(side_effect=McpSshError("channel closed"))
+    result = await ssh_pty_write("s1", "data", sm)
+    assert result["error"] == "write_error"
 
 
 # ---------------------------------------------------------------------------
@@ -161,6 +197,14 @@ async def test_pty_resize_session_not_found() -> None:
     assert result["error"] == "session_not_found"
 
 
+@pytest.mark.asyncio
+async def test_pty_resize_mcpssh_error() -> None:
+    sm = _make_session_manager()
+    sm.pty_resize = AsyncMock(side_effect=McpSshError("resize failed"))
+    result = await ssh_pty_resize("s1", cols=80, rows=24, session_manager=sm)
+    assert result["error"] == "resize_error"
+
+
 # ---------------------------------------------------------------------------
 # ssh_pty_close
 # ---------------------------------------------------------------------------
@@ -182,6 +226,16 @@ async def test_pty_close_session_not_found() -> None:
     audit = _make_audit()
     result = await ssh_pty_close("gone", sm, audit)
     assert result["error"] == "session_not_found"
+    audit.log.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_pty_close_mcpssh_error() -> None:
+    sm = _make_session_manager()
+    sm.pty_close = AsyncMock(side_effect=McpSshError("close failed"))
+    audit = _make_audit()
+    result = await ssh_pty_close("s1", sm, audit)
+    assert result["error"] == "close_error"
     audit.log.assert_not_called()
 
 
@@ -221,3 +275,11 @@ async def test_pty_attach_tmux_window_missing() -> None:
     result = await ssh_pty_attach("s1", sm)
     assert result["error"] == "session_not_found"
     assert "tmux session" in result["message"] or "not found" in result["message"].lower()
+
+
+@pytest.mark.asyncio
+async def test_pty_attach_mcpssh_error() -> None:
+    sm = _make_session_manager()
+    sm.pty_attach = AsyncMock(side_effect=McpSshError("attach failed"))
+    result = await ssh_pty_attach("s1", sm)
+    assert result["error"] == "attach_error"

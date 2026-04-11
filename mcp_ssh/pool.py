@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from typing import Any
 
 import asyncssh
@@ -21,41 +21,43 @@ class _ConnectionEntry:
 
 def _make_tofu_known_hosts(
     known_hosts_path: str,
-) -> Callable[[str, str, int | None], Sequence[str]]:
+) -> Callable[[str, str, int | None], tuple[list[str], list[str], list[str]]]:
     """Return a known_hosts callable implementing TOFU (trust-on-first-use).
 
-    - If the host is not yet in the file, return [] (asyncssh accepts the key).
-      We record the new key post-connect via a separate step.
-    - If the host is in the file, return the stored key strings.
-      asyncssh will verify the server key against them; mismatch → raises.
+    asyncssh 2.14+ expects the callable to return a 3-tuple of key-string lists:
+        (trusted_host_keys, trusted_ca_keys, revoked_keys)
 
-    The 'record new key' step is handled by _append_host_key(), called after
-    asyncssh.connect() returns successfully when the host was previously unknown.
+    - Unknown host → return ([], [], []) so asyncssh accepts any presented key.
+      The key is then recorded by _append_host_key() after a successful connect.
+    - Known host → return ([stored_key_str, ...], [], []) so asyncssh verifies
+      the server key; a mismatch raises HostKeyNotVerifiable.
     """
 
     def callable_impl(
         host: str, addr: str, port: int | None
-    ) -> Sequence[str]:
+    ) -> tuple[list[str], list[str], list[str]]:
         os.makedirs(os.path.dirname(os.path.expanduser(known_hosts_path)), exist_ok=True)
         path = os.path.expanduser(known_hosts_path)
         try:
             known = asyncssh.read_known_hosts(path)
         except OSError:
-            # File doesn't exist or is unreadable → new host
-            return []
+            # File doesn't exist or is unreadable → new host, accept any key
+            return ([], [], [])
 
         host_keys, ca_keys, _rev, _x509, _revx, _subj, _revsubj = known.match(
             host, addr, port
         )
         if host_keys or ca_keys:
-            # Host is known; return the raw PEM/OpenSSH strings so asyncssh can verify
-            results: list[str] = []
-            for key in list(host_keys) + list(ca_keys):
-                results.append(key.export_public_key("openssh").decode())
-            return results
+            # Host is known; return OpenSSH-format key strings so asyncssh
+            # can verify the presented key against them.
+            trusted: list[str] = [
+                key.export_public_key("openssh").decode()
+                for key in list(host_keys) + list(ca_keys)
+            ]
+            return (trusted, [], [])
 
-        # Host not yet in file → accept (new host)
-        return []
+        # Host not yet recorded → accept any key (TOFU first connect)
+        return ([], [], [])
 
     return callable_impl
 
@@ -306,9 +308,31 @@ class ConnectionPool:
 
         return kwargs
 
+    def _is_host_known(self, host: str, known_hosts_path: str) -> bool:
+        """Return True if *host* already has an entry in the known_hosts file.
+
+        Scans the file line-by-line rather than using asyncssh's match() API
+        (which requires a resolved IP address as the *addr* argument).
+        """
+        path = os.path.expanduser(known_hosts_path)
+        try:
+            with open(path) as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    parts = line.split()
+                    # "@cert-authority <host> <keytype> <key>" vs "<host> <keytype> <key>"
+                    host_token = parts[1] if parts[0].startswith("@") else parts[0]
+                    if host_token == host or host_token.startswith(f"{host},"):
+                        return True
+            return False
+        except OSError:
+            return False
+
     def _make_known_hosts_arg(
         self, cfg: ServerConfig
-    ) -> Callable[[str, str, int | None], Sequence[str]] | str | None:
+    ) -> Callable[[str, str, int | None], tuple[list[str], list[str], list[str]]] | str | None:
         """Return an appropriate known_hosts value for asyncssh.create_connection."""
         settings = self._settings
         policy = cfg.host_key_policy or settings.default_host_key_policy
@@ -318,7 +342,11 @@ class ConnectionPool:
             return os.path.expanduser(known_hosts_path)
 
         if policy == HostKeyPolicy.tofu:
-            return _make_tofu_known_hosts(known_hosts_path)
+            if self._is_host_known(cfg.host, known_hosts_path):
+                # Known host: enforce strict verification against stored key
+                return os.path.expanduser(known_hosts_path)
+            # Unknown host: accept any key; _append_host_key() saves it after connect
+            return None
 
         # accept_new: accept any key
         return None
