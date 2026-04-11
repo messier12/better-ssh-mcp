@@ -54,6 +54,7 @@ better-ssh-mcp --version
 
 | Document | Purpose |
 |---|---|
+| [SERVERS.md](SERVERS.md) | **Multi-server management** — organization patterns, jump hosts, credential management, best practices |
 | [FEATURES.md](FEATURES.md) | **Tool guide & audit documentation** — all tools explained, audit log format, filtering examples |
 | [INSTALL.md](INSTALL.md) | **Debian/Ubuntu setup** — system dependencies, uv tool, pip, Claude Desktop config |
 | [INSTALL-NIX.md](INSTALL-NIX.md) | **Nix setup** — flakes, Home Manager module, NixOS module, Claude Desktop path |
