@@ -66,7 +66,7 @@ class SessionManager:
         self._servers = servers or {}
 
         # In-memory state for live PTY processes (no-tmux path)
-        self._pty_procs: dict[str, asyncssh.SSHClientProcess[bytes]] = {}
+        self._pty_procs: dict[str, asyncssh.SSHClientProcess[str]] = {}
         self._pty_buffers: dict[str, collections.deque[bytes]] = {}
         self._drain_tasks: dict[str, asyncio.Task[None]] = {}
 
@@ -300,6 +300,7 @@ class SessionManager:
                 request_pty=True,
                 term_type="xterm-256color",
                 term_size=(cols, rows),
+                encoding="utf-8",
             )
             self._pty_procs[session_id] = proc
             self._pty_buffers[session_id] = collections.deque(maxlen=65536)
@@ -372,7 +373,7 @@ class SessionManager:
         return session_id
 
     async def _drain_pty(
-        self, session_id: str, proc: asyncssh.SSHClientProcess[bytes]
+        self, session_id: str, proc: asyncssh.SSHClientProcess[str]
     ) -> None:
         """Background task: read chunks from PTY stdout into the session buffer."""
         buf = self._pty_buffers.get(session_id)
@@ -446,7 +447,7 @@ class SessionManager:
         if not session.use_tmux:
             proc = self._pty_procs.get(session_id)
             if proc is not None:
-                proc.stdin.write(data.encode())
+                proc.stdin.write(data)
         else:
             # tmux path
             tmux_session = self._tmux_sessions.get(session_id, "")
