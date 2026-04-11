@@ -104,6 +104,16 @@ class ConnectionPool:
 
     Handles connection lifecycle, keepalive, auth-type mapping, ProxyJump
     resolution, and known-hosts policy.
+
+    Security notes:
+    - ``HostKeyPolicy.accept_new`` disables all host key verification and is
+      vulnerable to machine-in-the-middle attacks. It must not be used as the
+      default and should only be used in isolated, trusted environments.
+    - ``HostKeyPolicy.tofu`` accepts any key on first connect and enforces it
+      on all subsequent connections. It provides protection against MITM after
+      the initial trust establishment.
+    - This implementation assumes single-user operation. Auth credentials are
+      read from the process environment; no per-user access control is enforced.
     """
 
     def __init__(

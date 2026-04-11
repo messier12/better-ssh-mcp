@@ -1,6 +1,6 @@
 # mcp-ssh — Task Progress
 
-Last updated: 2026-04-11 (T2 completed)
+Last updated: 2026-04-11 (T4 completed)
 
 ## Status legend
 - `pending` — not started
@@ -40,21 +40,22 @@ Last updated: 2026-04-11 (T2 completed)
 
 | Gate | Status | Notes |
 |---|---|---|
-| Gate 2 | pending | Blocks T3a/T3b/T3c |
+| Gate 2 | done | Approved 2026-04-11 by sec-agent. Enforced 0o600 on state file; documented accept_new risk; confirmed command injection protection. See gate2-review.md. |
 
 ## Phase 3 (parallel, depends on Gate 2)
 
 | Task | Status | Notes |
 |---|---|---|
-| T3a — Registry tools | pending | |
-| T3b — Exec tools | pending | |
-| T3c — PTY tools | pending | |
+| T3a — Registry tools | done | list/register/deregister/add-known/show-known implemented with structured errors and audit logs. 17 tests pass. |
+| T3b — Exec tools | done | exec/stream/read/write/kill/list/check implemented. Poll loop and fallback cwd/env logic included. 22 tests pass. |
+| T3c — PTY tools | done | start/read/write/resize/close/attach implemented with tmux support and error handling. 15 tests pass. |
 
 ## Phase 4
 
 | Task | Status | Notes |
 |---|---|---|
-| T4 — Server entrypoint + integration tests | pending | |
+| T4 — Server entrypoint + integration tests | done | FastMCP app wires all 18 tools. 8 integration tests pass including local asyncssh server and shutdown logic. |
+
 
 ## Phase 5 (parallel, depends on T0; update after T4)
 

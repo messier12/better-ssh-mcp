@@ -14,6 +14,7 @@ Claude to connect to and operate remote hosts securely.
 | [.agentdocs/progress.md](.agentdocs/progress.md) | Live task status — update this after every task or gate completes |
 | [.agentdocs/gate1-review.md](.agentdocs/gate1-review.md) | Gate 1 arch review notes (created when Gate 1 runs) |
 | [.agentdocs/gate2-review.md](.agentdocs/gate2-review.md) | Gate 2 security audit notes (created when Gate 2 runs) |
+| [.agentdocs/remaining-tasks.md](.agentdocs/remaining-tasks.md) | **Check this before proceeding** — critical items missing for Gate 3 compliance |
 
 ## Task dependency graph
 
@@ -70,9 +71,10 @@ reopening Gate 1.
 ## Rules for all agents
 
 1. Read [.agentdocs/progress.md](.agentdocs/progress.md) first — check what is done and what your task depends on.
-2. Update [.agentdocs/progress.md](.agentdocs/progress.md) when you complete a task or gate.
-3. Write any scratch notes or intermediate output to `.agentdocs/` (e.g. `agent-t1a-notes.md`).
-4. All code must pass `mypy --strict` and `ruff check` before marking a task done.
-5. Test coverage ≥ 80% per module before marking done.
-6. Never alter `models.py` or `interfaces.py` after Gate 1 without reopening it.
-7. Passwords, passphrases, and env var values must never appear in audit log events.
+2. Read [.agentdocs/remaining-tasks.md](.agentdocs/remaining-tasks.md) to understand current implementation gaps or pending polish items.
+3. Update [.agentdocs/progress.md](.agentdocs/progress.md) when you complete a task or gate.
+4. Write any scratch notes or intermediate output to `.agentdocs/` (e.g. `agent-t1a-notes.md`).
+5. All code must pass `mypy --strict` and `ruff check` before marking a task done.
+6. Test coverage ≥ 80% per module before marking done.
+7. Never alter `models.py` or `interfaces.py` after Gate 1 without reopening it.
+8. Passwords, passphrases, and env var values must never appear in audit log events.

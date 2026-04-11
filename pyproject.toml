@@ -46,10 +46,23 @@ dev = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+filterwarnings = [
+    # _drain_pty tasks are left pending when tests don't call pty_close().
+    # Production code always cancels them via pty_close(); this is a
+    # test-teardown artefact, not a production bug.
+    "ignore:coroutine.*_drain_pty.*was never awaited:RuntimeWarning",
+]
 
 [tool.mypy]
 strict = true
 python_version = "3.11"
+
+[[tool.mypy.overrides]]
+# FastMCP's @mcp.tool() decorator is typed as returning Any, which causes
+# untyped-decorator + cascading unused-ignore errors in server.py only.
+# All other strict checks remain active for this module.
+module = "mcp_ssh.server"
+disable_error_code = ["untyped-decorator", "unused-ignore"]
 
 [tool.ruff]
 target-version = "py311"

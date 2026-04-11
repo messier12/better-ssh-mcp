@@ -25,6 +25,11 @@ class StateStore:
 
     Supports atomic writes, schema versioning, and graceful handling of
     missing or corrupt state files.
+
+    Security note: this implementation assumes single-user operation. Process and
+    session IDs are UUIDs; there is no access control between different OS users.
+    If multi-user support is ever added, per-user namespacing must be enforced here.
+    The state file is created with mode 0o600 (owner read/write only).
     """
 
     def __init__(self, settings: GlobalSettings | None = None) -> None:
@@ -157,5 +162,9 @@ class StateStore:
             },
         }
 
+        existed = self._path.exists()
         tmp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         os.replace(tmp_path, self._path)
+        if not existed:
+            # Restrict newly created file to owner-read/write only.
+            os.chmod(self._path, 0o600)

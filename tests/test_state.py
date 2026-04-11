@@ -335,3 +335,18 @@ def test_creates_parent_directories(tmp_path: Path) -> None:
     store = StateStore(settings)
     store.upsert_process(_process())
     assert (deep / "state.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# File permissions (security)
+# ---------------------------------------------------------------------------
+
+def test_state_file_created_with_0o600_permissions(tmp_path: Path) -> None:
+    """Newly created state file must be readable only by owner (mode 0o600)."""
+    settings = _settings(tmp_path)
+    store = StateStore(settings)
+    store.upsert_process(_process())
+
+    state_path = Path(settings.state_file)
+    mode = state_path.stat().st_mode & 0o777
+    assert mode == 0o600, f"Expected 0o600, got 0o{mode:03o}"
