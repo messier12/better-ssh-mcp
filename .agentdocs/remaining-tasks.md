@@ -16,8 +16,8 @@ This document tracks items that are not yet fully compliant with the `mcp-ssh-pl
 
 ## 3. Documentation & Security (Gate 3 Sec Checklist)
 
-- [ ] **Temp File Cleanup Path:** Document the strategy for cleaning up `/tmp/mcp-{uuid}.log` and `.exit` files in `mcp_ssh/tools/exec_tools.py` or a dedicated architecture note.
-- [ ] **Audit Log Rotation:** Document the recommended audit log rotation strategy (e.g., using `logrotate` or `journald` integration).
+- [x] **Temp File Cleanup Path:** Documented in `.agentdocs/ops-notes.md` — periodic remote cron, explicit `ssh_exec rm` on exit detection, no auto-delete by design.
+- [x] **Audit Log Rotation:** Documented in `.agentdocs/ops-notes.md` — `logrotate` with `copytruncate` (recommended) and optional `journald` integration.
 
 ## 4. Final Review
 
