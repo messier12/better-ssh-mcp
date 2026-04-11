@@ -1,0 +1,31 @@
+# Example servers.toml for mcp-ssh tests
+
+[settings]
+known_hosts_file = "~/.local/share/mcp-ssh/known_hosts"
+default_host_key_policy = "tofu"
+audit_log = "~/.local/share/mcp-ssh/audit.jsonl"
+state_file = "~/.local/share/mcp-ssh/state.json"
+max_sessions = 10
+keepalive_interval = 30
+keepalive_count_max = 5
+connect_timeout = 15
+default_encoding = "utf-8"
+
+[servers.dev]
+name = "dev"
+host = "dev.example.com"
+port = 22
+user = "alice"
+auth_type = "key"
+key_path = "~/.ssh/id_ed25519"
+default_cwd = "/home/alice"
+
+[servers.prod]
+name = "prod"
+host = "prod.example.com"
+port = 2222
+user = "deploy"
+auth_type = "agent"
+host_key_policy = "strict"
+default_env = { APP_ENV = "production" }
+max_sessions = 5
