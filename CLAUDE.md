@@ -1,8 +1,8 @@
-# mcp-ssh — Claude Code Project Guide
+# better-ssh-mcp — Claude Code Project Guide
 
 ## Project overview
 
-`mcp-ssh` is an MCP (Model Context Protocol) server that exposes SSH operations as
+`better-ssh-mcp` is an MCP (Model Context Protocol) server that exposes SSH operations as
 tools — non-interactive exec, background processes, and PTY sessions — allowing
 Claude to connect to and operate remote hosts securely.
 
@@ -10,7 +10,7 @@ Claude to connect to and operate remote hosts securely.
 
 | Document | Purpose |
 |---|---|
-| [.agentdocs/mcp-ssh-plan.md](.agentdocs/mcp-ssh-plan.md) | **Master implementation plan** — task graph, interface contracts, acceptance criteria |
+| [.agentdocs/better-ssh-mcp-plan.md](.agentdocs/better-ssh-mcp-plan.md) | **Master implementation plan** — task graph, interface contracts, acceptance criteria |
 | [.agentdocs/progress.md](.agentdocs/progress.md) | Live task status — update this after every task or gate completes |
 | [.agentdocs/gate1-review.md](.agentdocs/gate1-review.md) | Gate 1 arch review notes (created when Gate 1 runs) |
 | [.agentdocs/gate2-review.md](.agentdocs/gate2-review.md) | Gate 2 security audit notes (created when Gate 2 runs) |

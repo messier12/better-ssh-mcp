@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "mcp-ssh"
+name = "better-ssh-mcp"
 version = "0.1.0"
 description = "MCP server exposing SSH operations as tools"
 readme = "INSTALL.md"
@@ -28,7 +28,7 @@ dependencies = [
 ]
 
 [project.scripts]
-mcp-ssh = "mcp_ssh.server:main"
+better-ssh-mcp = "mcp_ssh.server:main"
 
 [project.urls]
 Homepage = "https://github.com/messier12/better-ssh-mcp"

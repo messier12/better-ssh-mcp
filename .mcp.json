@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "better-ssh-mcp": {
+      "command": "/home/das/repos/better-ssh-mcp/run-mcp.sh"
+    }
+  }
+}
