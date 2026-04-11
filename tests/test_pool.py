@@ -626,12 +626,14 @@ async def test_on_close_marks_disconnected() -> None:
 def test_tofu_known_hosts_callable_returns_empty_for_unknown_host(
     tmp_path: object,
 ) -> None:
-    """For a new (unknown) host, the callable should return an empty sequence."""
-    # Use a non-existent file path so the host is unknown
+    """For a new (unknown) host the callable returns ([], [], []) — no trusted keys.
+    asyncssh 2.14+ expects the 3-tuple nested format; a flat [] caused IndexError."""
     known_hosts_path = str(tmp_path) + "/nonexistent/known_hosts"  # type: ignore[operator]
     fn = _make_tofu_known_hosts(known_hosts_path)
-    result = fn("newhost.example.com", "192.0.2.1", 22)
-    assert list(result) == []
+    host_keys, ca_keys, revoked = fn("newhost.example.com", "192.0.2.1", 22)
+    assert host_keys == []
+    assert ca_keys == []
+    assert revoked == []
 
 
 # ---------------------------------------------------------------------------

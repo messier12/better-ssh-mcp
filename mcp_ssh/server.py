@@ -102,34 +102,56 @@ class AppContext:
 def _register_tools(mcp: Any, ctx: AppContext) -> None:
     """Register all 15 SSH MCP tools on the FastMCP app."""
     from .tools.exec_tools import (
-        ssh_check_process,
-        ssh_exec,
-        ssh_exec_stream,
-        ssh_kill_process,
-        ssh_list_processes,
-        ssh_read_process,
-        ssh_write_process,
+        ssh_check_process as ssh_check_process_fn,
+    )
+    from .tools.exec_tools import (
+        ssh_exec as ssh_exec_fn,
+    )
+    from .tools.exec_tools import (
+        ssh_exec_stream as ssh_exec_stream_fn,
+    )
+    from .tools.exec_tools import (
+        ssh_kill_process as ssh_kill_process_fn,
+    )
+    from .tools.exec_tools import (
+        ssh_list_processes as ssh_list_processes_fn,
+    )
+    from .tools.exec_tools import (
+        ssh_read_process as ssh_read_process_fn,
+    )
+    from .tools.exec_tools import (
+        ssh_write_process as ssh_write_process_fn,
     )
     from .tools.pty_tools import (
-        ssh_pty_attach,
-        ssh_pty_close,
-        ssh_pty_read,
-        ssh_pty_resize,
-        ssh_pty_write,
-        ssh_start_pty,
+        ssh_pty_attach as ssh_pty_attach_fn,
+    )
+    from .tools.pty_tools import (
+        ssh_pty_close as ssh_pty_close_fn,
+    )
+    from .tools.pty_tools import (
+        ssh_pty_read as ssh_pty_read_fn,
+    )
+    from .tools.pty_tools import (
+        ssh_pty_resize as ssh_pty_resize_fn,
+    )
+    from .tools.pty_tools import (
+        ssh_pty_write as ssh_pty_write_fn,
+    )
+    from .tools.pty_tools import (
+        ssh_start_pty as ssh_start_pty_fn,
     )
     from .tools.registry_tools import async_ssh_add_known_host
 
     # --- Registry tools (T3a) ---
 
     @mcp.tool()
-    def ssh_list_servers_tool() -> dict[str, Any]:  # type: ignore[return]
+    def ssh_list_servers() -> dict[str, Any]:  # type: ignore[return]
         """List all registered SSH servers and their connection statuses."""
         from .tools.registry_tools import ssh_list_servers as _fn
         return _fn(registry=ctx.registry, pool=ctx.pool)
 
     @mcp.tool()
-    def ssh_register_server_tool(  # type: ignore[return]
+    def ssh_register_server(  # type: ignore[return]
         name: str,
         host: str,
         user: str,
@@ -156,20 +178,20 @@ def _register_tools(mcp: Any, ctx: AppContext) -> None:
         )
 
     @mcp.tool()
-    def ssh_deregister_server_tool(name: str) -> dict[str, Any]:  # type: ignore[return]
+    def ssh_deregister_server(name: str) -> dict[str, Any]:  # type: ignore[return]
         """Deregister a previously registered SSH server."""
         from .tools.registry_tools import ssh_deregister_server as _fn
         return _fn(name=name, registry=ctx.registry, pool=ctx.pool, audit=ctx.audit)
 
     @mcp.tool()
-    async def ssh_add_known_host_tool(name: str) -> dict[str, Any]:  # type: ignore[return]
+    async def ssh_add_known_host(name: str) -> dict[str, Any]:  # type: ignore[return]
         """Connect and record the server's host key in known_hosts."""
         return await async_ssh_add_known_host(
             name=name, registry=ctx.registry, pool=ctx.pool, audit=ctx.audit
         )
 
     @mcp.tool()
-    def ssh_show_known_host_tool(name: str) -> dict[str, Any]:  # type: ignore[return]
+    def ssh_show_known_host(name: str) -> dict[str, Any]:  # type: ignore[return]
         """Show the stored known host key for a registered server."""
         from .tools.registry_tools import ssh_show_known_host as _fn
         return _fn(name=name, registry=ctx.registry)
@@ -177,76 +199,76 @@ def _register_tools(mcp: Any, ctx: AppContext) -> None:
     # --- Exec tools (T3b) ---
 
     @mcp.tool()
-    async def ssh_exec_tool(  # type: ignore[return]
+    async def ssh_exec(  # type: ignore[return]
         server: str,
         command: str,
         cwd: str | None = None,
         timeout: float | None = 30.0,
     ) -> dict[str, Any]:
         """Run a command on a remote server and wait for completion."""
-        return await ssh_exec(
+        return await ssh_exec_fn(
             server=server, command=command,
             registry=ctx.registry, pool=ctx.pool, audit=ctx.audit,
             cwd=cwd, timeout=timeout,
         )
 
     @mcp.tool()
-    async def ssh_exec_stream_tool(  # type: ignore[return]
+    async def ssh_exec_stream(  # type: ignore[return]
         server: str,
         command: str,
         cwd: str | None = None,
     ) -> dict[str, Any]:
         """Start a long-running background process (nohup-backed)."""
-        return await ssh_exec_stream(
+        return await ssh_exec_stream_fn(
             server=server, command=command,
             session_manager=ctx.session_manager, audit=ctx.audit,
             cwd=cwd,
         )
 
     @mcp.tool()
-    async def ssh_read_process_tool(  # type: ignore[return]
+    async def ssh_read_process(  # type: ignore[return]
         process_id: str,
         max_bytes: int = 65536,
     ) -> dict[str, Any]:
         """Read buffered output from a background process."""
-        return await ssh_read_process(
+        return await ssh_read_process_fn(
             process_id=process_id,
             session_manager=ctx.session_manager,
             max_bytes=max_bytes,
         )
 
     @mcp.tool()
-    async def ssh_write_process_tool(process_id: str, data: str) -> dict[str, Any]:  # type: ignore[return]
+    async def ssh_write_process(process_id: str, data: str) -> dict[str, Any]:  # type: ignore[return]
         """Write data to a background process's stdin."""
-        return await ssh_write_process(
+        return await ssh_write_process_fn(
             process_id=process_id, data=data, session_manager=ctx.session_manager
         )
 
     @mcp.tool()
-    async def ssh_kill_process_tool(  # type: ignore[return]
+    async def ssh_kill_process(  # type: ignore[return]
         process_id: str, signal: str = "SIGTERM"
     ) -> dict[str, Any]:
         """Send a signal to a background process."""
-        return await ssh_kill_process(
+        return await ssh_kill_process_fn(
             process_id=process_id, session_manager=ctx.session_manager, signal=signal
         )
 
     @mcp.tool()
-    def ssh_list_processes_tool(server: str | None = None) -> dict[str, Any]:  # type: ignore[return]
+    def ssh_list_processes(server: str | None = None) -> dict[str, Any]:  # type: ignore[return]
         """List tracked background processes, optionally filtered by server."""
-        return ssh_list_processes(session_manager=ctx.session_manager, server=server)
+        return ssh_list_processes_fn(session_manager=ctx.session_manager, server=server)
 
     @mcp.tool()
-    async def ssh_check_process_tool(process_id: str) -> dict[str, Any]:  # type: ignore[return]
+    async def ssh_check_process(process_id: str) -> dict[str, Any]:  # type: ignore[return]
         """Check liveness of a background process and return its status."""
-        return await ssh_check_process(
+        return await ssh_check_process_fn(
             process_id=process_id, session_manager=ctx.session_manager
         )
 
     # --- PTY tools (T3c) ---
 
     @mcp.tool()
-    async def ssh_start_pty_tool(  # type: ignore[return]
+    async def ssh_start_pty(  # type: ignore[return]
         server: str,
         command: str | None = None,
         cols: int = 220,
@@ -254,48 +276,48 @@ def _register_tools(mcp: Any, ctx: AppContext) -> None:
         use_tmux: bool = False,
     ) -> dict[str, Any]:
         """Open a PTY session on a remote server."""
-        return await ssh_start_pty(
+        return await ssh_start_pty_fn(
             server=server, session_manager=ctx.session_manager, audit=ctx.audit,
             command=command, cols=cols, rows=rows, use_tmux=use_tmux,
         )
 
     @mcp.tool()
-    async def ssh_pty_read_tool(  # type: ignore[return]
+    async def ssh_pty_read(  # type: ignore[return]
         session_id: str, max_bytes: int = 65536
     ) -> dict[str, Any]:
         """Read buffered output from a PTY session."""
-        return await ssh_pty_read(
+        return await ssh_pty_read_fn(
             session_id=session_id, session_manager=ctx.session_manager, max_bytes=max_bytes
         )
 
     @mcp.tool()
-    async def ssh_pty_write_tool(session_id: str, data: str) -> dict[str, Any]:  # type: ignore[return]
+    async def ssh_pty_write(session_id: str, data: str) -> dict[str, Any]:  # type: ignore[return]
         """Write data to a PTY session (use \\r to submit a line)."""
-        return await ssh_pty_write(
+        return await ssh_pty_write_fn(
             session_id=session_id, data=data, session_manager=ctx.session_manager
         )
 
     @mcp.tool()
-    async def ssh_pty_resize_tool(  # type: ignore[return]
+    async def ssh_pty_resize(  # type: ignore[return]
         session_id: str, cols: int, rows: int
     ) -> dict[str, Any]:
         """Resize a PTY session."""
-        return await ssh_pty_resize(
+        return await ssh_pty_resize_fn(
             session_id=session_id, cols=cols, rows=rows,
             session_manager=ctx.session_manager,
         )
 
     @mcp.tool()
-    async def ssh_pty_close_tool(session_id: str) -> dict[str, Any]:  # type: ignore[return]
+    async def ssh_pty_close(session_id: str) -> dict[str, Any]:  # type: ignore[return]
         """Close a PTY session and clean up resources."""
-        return await ssh_pty_close(
+        return await ssh_pty_close_fn(
             session_id=session_id, session_manager=ctx.session_manager, audit=ctx.audit
         )
 
     @mcp.tool()
-    async def ssh_pty_attach_tool(session_id: str) -> dict[str, Any]:  # type: ignore[return]
+    async def ssh_pty_attach(session_id: str) -> dict[str, Any]:  # type: ignore[return]
         """Attach to an existing tmux-backed PTY session."""
-        return await ssh_pty_attach(
+        return await ssh_pty_attach_fn(
             session_id=session_id, session_manager=ctx.session_manager
         )
 

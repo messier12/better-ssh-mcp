@@ -96,9 +96,14 @@ class SessionManager:
         )
         cd_part = f"cd {shlex.quote(cwd)} && " if cwd else ""
         inner = cd_part + (env_exports + " " if env_exports else "") + command
+        # BUG-1 fix: inner includes the exit-code capture so the whole nohup is
+        # backgrounded with & and echo $! captures nohup's PID, not a subshell.
+        # Wrap inner in (...) so that a user `exit N` only exits the subshell;
+        # the outer shell still runs `echo $? > exitfile`.
+        inner_with_exit = f"({inner}); echo $? > {exit_file}"
         remote_cmd = (
-            f"nohup bash -c {shlex.quote(inner)} > {log_file} 2>&1; "
-            f"echo $? > {exit_file} & echo $!"
+            f"nohup bash -c {shlex.quote(inner_with_exit)} "
+            f"> {log_file} 2>&1 & echo $!"
         )
 
         conn = await self._pool.get_connection(server)
@@ -110,6 +115,11 @@ class SessionManager:
             raise RemoteCommandError(
                 f"start_process: expected integer PID from remote, got {stdout!r}"
             ) from exc
+        # BUG-2 fix: reject PID of 0 which would send signals to the whole process group
+        if pid <= 0:
+            raise RemoteCommandError(
+                f"start_process: invalid PID {pid!r} returned by remote (must be > 0)"
+            )
 
         record = ProcessRecord(
             id=process_id,
@@ -437,15 +447,25 @@ class SessionManager:
             proc = self._pty_procs.get(session_id)
             if proc is not None:
                 proc.stdin.write(data.encode())
-            return
+        else:
+            # tmux path
+            tmux_session = self._tmux_sessions.get(session_id, "")
+            conn = self._tmux_conns.get(session_id)
+            if conn is not None:
+                await conn.run(
+                    f"tmux send-keys -t {shlex.quote(tmux_session)} -- {shlex.quote(data)}"
+                )
 
-        # tmux path
-        tmux_session = self._tmux_sessions.get(session_id, "")
-        conn = self._tmux_conns.get(session_id)
-        if conn is not None:
-            await conn.run(
-                f"tmux send-keys -t {shlex.quote(tmux_session)} -- {shlex.quote(data)}"
+        self._audit.log(
+            AuditEvent(
+                ts=datetime.utcnow(),
+                tool="pty_write",
+                server=session.server,
+                session_id=session_id,
+                outcome="written",
+                detail={"bytes": len(data)},
             )
+        )
 
     async def pty_resize(self, session_id: str, cols: int, rows: int) -> None:
         """Resize the PTY session *session_id* to *cols* x *rows*."""
@@ -457,16 +477,26 @@ class SessionManager:
             proc = self._pty_procs.get(session_id)
             if proc is not None:
                 proc.change_terminal_size(width=cols, height=rows)
-            return
+        else:
+            # tmux path
+            tmux_session = self._tmux_sessions.get(session_id, "")
+            conn = self._tmux_conns.get(session_id)
+            if conn is not None:
+                await conn.run(
+                    f"tmux resize-window -t {shlex.quote(tmux_session)} "
+                    f"-x {cols} -y {rows}"
+                )
 
-        # tmux path
-        tmux_session = self._tmux_sessions.get(session_id, "")
-        conn = self._tmux_conns.get(session_id)
-        if conn is not None:
-            await conn.run(
-                f"tmux resize-window -t {shlex.quote(tmux_session)} "
-                f"-x {cols} -y {rows}"
+        self._audit.log(
+            AuditEvent(
+                ts=datetime.utcnow(),
+                tool="pty_resize",
+                server=session.server,
+                session_id=session_id,
+                outcome="resized",
+                detail={"cols": cols, "rows": rows},
             )
+        )
 
     async def pty_close(self, session_id: str) -> None:
         """Close the PTY session *session_id* and clean up resources."""
