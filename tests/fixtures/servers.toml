@@ -29,3 +29,11 @@ auth_type = "agent"
 host_key_policy = "strict"
 default_env = { APP_ENV = "production" }
 max_sessions = 5
+
+[servers.test]
+name = "test"
+host = "192.0.2.100"
+port = 22
+user = "testuser"
+auth_type = "key"
+key_path = "~/.ssh/id_rsa"
