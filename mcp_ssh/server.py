@@ -359,13 +359,13 @@ def _register_tools(mcp: Any, ctx: AppContext) -> None:
 def main() -> None:
     """Entrypoint for the mcp-ssh server."""
     parser = argparse.ArgumentParser(
-        prog="mcp-ssh",
+        prog="better-ssh-mcp",
         description="MCP server exposing SSH operations as tools",
     )
     parser.add_argument(
         "--version",
         action="version",
-        version=f"%(prog)s {importlib.metadata.version('mcp-ssh')}",
+        version=f"%(prog)s {importlib.metadata.version('better-ssh-mcp')}",
     )
     parser.add_argument(
         "--config",

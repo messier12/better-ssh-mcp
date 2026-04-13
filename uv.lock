@@ -56,6 +56,43 @@ wheels = [
 ]
 
 [[package]]
+name = "better-ssh-mcp"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "asyncssh" },
+    { name = "mcp", extra = ["cli"] },
+    { name = "pydantic" },
+    { name = "watchfiles" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "asyncssh", specifier = ">=2.14" },
+    { name = "mcp", extras = ["cli"], specifier = ">=1.0" },
+    { name = "pydantic", specifier = ">=2" },
+    { name = "watchfiles", specifier = ">=0.21" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "mypy", specifier = ">=1.8" },
+    { name = "pytest", specifier = ">=7" },
+    { name = "pytest-asyncio", specifier = ">=0.23" },
+    { name = "pytest-cov", specifier = ">=4" },
+    { name = "ruff", specifier = ">=0.3" },
+]
+
+[[package]]
 name = "certifi"
 version = "2026.2.25"
 source = { registry = "https://pypi.org/simple" }
@@ -523,43 +560,6 @@ wheels = [
 cli = [
     { name = "python-dotenv" },
     { name = "typer" },
-]
-
-[[package]]
-name = "mcp-ssh"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "asyncssh" },
-    { name = "mcp", extra = ["cli"] },
-    { name = "pydantic" },
-    { name = "watchfiles" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "mypy" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-cov" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "asyncssh", specifier = ">=2.14" },
-    { name = "mcp", extras = ["cli"], specifier = ">=1.0" },
-    { name = "pydantic", specifier = ">=2" },
-    { name = "watchfiles", specifier = ">=0.21" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "mypy", specifier = ">=1.8" },
-    { name = "pytest", specifier = ">=7" },
-    { name = "pytest-asyncio", specifier = ">=0.23" },
-    { name = "pytest-cov", specifier = ">=4" },
-    { name = "ruff", specifier = ">=0.3" },
 ]
 
 [[package]]

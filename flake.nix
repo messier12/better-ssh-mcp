@@ -12,7 +12,14 @@
       perSystemOutputs = flake-utils.lib.eachDefaultSystem (system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
-          python = pkgs.python311;
+          # sphinx-9.x in this nixpkgs snapshot declares itself incompatible with
+          # Python 3.11.  Several of our runtime deps (asyncssh, pydantic, …) pull
+          # sphinx into nativeBuildInputs for optional doc-generation.  We don't
+          # need docs, so we create a patched Python 3.11 interpreter whose package
+          # set removes the sphinx version check.  Using python.override with
+          # packageOverrides is the canonical way to propagate a patch across the
+          # entire dependency graph.
+          python = pkgs.python312;
 
           mcpSshPackage = python.pkgs.buildPythonPackage {
             pname = "mcp-ssh";
@@ -28,20 +35,19 @@
             # .so available in the package's closure.
             buildInputs = [ pkgs.libfido2 ];
 
-            # Runtime Python deps are managed by uv/pyproject.toml.
-            # asyncssh and other deps are omitted from propagatedBuildInputs
-            # because their nixpkgs transitive deps (pyopenssl → sphinx-9.x)
-            # are incompatible with python3.11 in this nixpkgs snapshot.
-            propagatedBuildInputs = [];
+            propagatedBuildInputs = with python.pkgs; [
+              asyncssh
+              pydantic
+              watchfiles
+              mcp
+            ];
 
             doCheck = false;
-            pythonImportsCheck = [];
-            # Disable runtime deps check since deps are managed via uv, not nixpkgs
-            dontCheckRuntimeDeps = true;
+            pythonImportsCheck = [ "mcp_ssh" ];
 
             meta = {
               description = "MCP server exposing SSH operations as tools";
-              mainProgram = "mcp-ssh";
+              mainProgram = "better-ssh-mcp";
               homepage = "https://github.com/messier12/better-ssh-mcp";
               license = nixpkgs.lib.licenses.mit;
             };
@@ -53,7 +59,7 @@
 
           apps.default = {
             type = "app";
-            program = "${mcpSshPackage}/bin/mcp-ssh";
+            program = "${mcpSshPackage}/bin/better-ssh-mcp";
           };
 
           devShells.default = pkgs.mkShell {
