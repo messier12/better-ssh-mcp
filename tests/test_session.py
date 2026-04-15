@@ -497,11 +497,12 @@ async def test_pty_write_no_tmux() -> None:
     proc_mock = MagicMock()
     proc_mock.stdin = MagicMock()
     proc_mock.stdin.write = MagicMock()
+    proc_mock.stdin.drain = AsyncMock()
     mgr._pty_procs["sess-1"] = proc_mock
 
     await mgr.pty_write("sess-1", "hello\r")
 
-    proc_mock.stdin.write.assert_called_once_with(b"hello\r")
+    proc_mock.stdin.write.assert_called_once_with("hello\r")
 
 
 # ---------------------------------------------------------------------------
