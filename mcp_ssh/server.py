@@ -100,7 +100,7 @@ class AppContext:
 
 
 def _register_tools(mcp: Any, ctx: AppContext) -> None:
-    """Register all 15 SSH MCP tools on the FastMCP app."""
+    """Register all 17 SSH MCP tools on the FastMCP app."""
     from .tools.exec_tools import (
         ssh_check_process as ssh_check_process_fn,
     )
@@ -141,7 +141,9 @@ def _register_tools(mcp: Any, ctx: AppContext) -> None:
         ssh_start_pty as ssh_start_pty_fn,
     )
     from .tools.registry_tools import async_ssh_add_known_host
+    from .tools.scp_tools import ssh_copy as ssh_copy_fn
     from .tools.scp_tools import ssh_get as ssh_get_fn
+    from .tools.scp_tools import ssh_move as ssh_move_fn
     from .tools.scp_tools import ssh_put as ssh_put_fn
 
     # --- Registry tools (T3a) ---
@@ -351,6 +353,40 @@ def _register_tools(mcp: Any, ctx: AppContext) -> None:
         """Upload a file or directory from a local path to a remote server."""
         return await ssh_put_fn(
             server=server, local_path=local_path, remote_path=remote_path,
+            recurse=recurse, preserve=preserve,
+            registry=ctx.registry, pool=ctx.pool, audit=ctx.audit,
+        )
+
+    @mcp.tool()
+    async def ssh_copy(  # type: ignore[return]
+        src_server: str,
+        src_path: str,
+        dst_server: str,
+        dst_path: str,
+        recurse: bool = False,
+        preserve: bool = False,
+    ) -> dict[str, Any]:
+        """Copy a file or directory from one remote server to another."""
+        return await ssh_copy_fn(
+            src_server=src_server, src_path=src_path,
+            dst_server=dst_server, dst_path=dst_path,
+            recurse=recurse, preserve=preserve,
+            registry=ctx.registry, pool=ctx.pool, audit=ctx.audit,
+        )
+
+    @mcp.tool()
+    async def ssh_move(  # type: ignore[return]
+        src_server: str,
+        src_path: str,
+        dst_server: str,
+        dst_path: str,
+        recurse: bool = False,
+        preserve: bool = False,
+    ) -> dict[str, Any]:
+        """Move a file or directory from one remote server to another."""
+        return await ssh_move_fn(
+            src_server=src_server, src_path=src_path,
+            dst_server=dst_server, dst_path=dst_path,
             recurse=recurse, preserve=preserve,
             registry=ctx.registry, pool=ctx.pool, audit=ctx.audit,
         )
