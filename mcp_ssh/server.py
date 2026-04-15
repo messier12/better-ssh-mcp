@@ -141,10 +141,9 @@ def _register_tools(mcp: Any, ctx: AppContext) -> None:
         ssh_start_pty as ssh_start_pty_fn,
     )
     from .tools.registry_tools import async_ssh_add_known_host
-    from .tools.scp_tools import ssh_copy as ssh_copy_fn
     from .tools.scp_tools import ssh_get as ssh_get_fn
-    from .tools.scp_tools import ssh_move as ssh_move_fn
     from .tools.scp_tools import ssh_put as ssh_put_fn
+    from .tools.scp_tools import ssh_transfer as ssh_transfer_fn
 
     # --- Registry tools (T3a) ---
 
@@ -360,7 +359,7 @@ def _register_tools(mcp: Any, ctx: AppContext) -> None:
         )
 
     @mcp.tool()
-    async def ssh_copy(  # type: ignore[return]
+    async def ssh_transfer(  # type: ignore[return]
         src_server: str,
         src_path: str,
         dst_server: str,
@@ -368,25 +367,13 @@ def _register_tools(mcp: Any, ctx: AppContext) -> None:
         recurse: bool = False,
         preserve: bool = False,
     ) -> dict[str, Any]:
-        """Copy a file or directory from one remote server to another."""
-        return await ssh_copy_fn(
-            src_server=src_server, src_path=src_path,
-            dst_server=dst_server, dst_path=dst_path,
-            recurse=recurse, preserve=preserve,
-            registry=ctx.registry, pool=ctx.pool, audit=ctx.audit,
-        )
+        """Copy a file or directory from one remote server to another.
 
-    @mcp.tool()
-    async def ssh_move(  # type: ignore[return]
-        src_server: str,
-        src_path: str,
-        dst_server: str,
-        dst_path: str,
-        recurse: bool = False,
-        preserve: bool = False,
-    ) -> dict[str, Any]:
-        """Move a file or directory from one remote server to another."""
-        return await ssh_move_fn(
+        Streams data through memory — nothing is written to local disk.
+        Same-server copies run ``cp`` remotely. To move instead of copy,
+        follow up with ``ssh_exec`` to delete the source.
+        """
+        return await ssh_transfer_fn(
             src_server=src_server, src_path=src_path,
             dst_server=dst_server, dst_path=dst_path,
             recurse=recurse, preserve=preserve,
