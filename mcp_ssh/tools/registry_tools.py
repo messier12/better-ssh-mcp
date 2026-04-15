@@ -38,6 +38,7 @@ def ssh_list_servers(
                 "user": cfg.user,
                 "auth_type": cfg.auth_type.value,
                 "status": status_value,
+                "note": cfg.note,
             }
         )
     return {"servers": result}
@@ -60,6 +61,7 @@ def ssh_register_server(
     default_env: dict[str, str] | None = None,
     max_sessions: int | None = None,
     keepalive_interval: int | None = None,
+    note: str | None = None,
 ) -> dict[str, Any]:
     """Register a new SSH server configuration.
 
@@ -97,6 +99,7 @@ def ssh_register_server(
             default_env=default_env or {},
             max_sessions=max_sessions,
             keepalive_interval=keepalive_interval,
+            note=note,
         )
     except (ValueError, Exception) as exc:  # noqa: BLE001
         return {

@@ -169,6 +169,7 @@ def _register_tools(mcp: Any, ctx: AppContext) -> None:
         default_cwd: str | None = None,
         max_sessions: int | None = None,
         keepalive_interval: int | None = None,
+        note: str | None = None,
     ) -> dict[str, Any]:
         """Register a new SSH server configuration."""
         from .tools.registry_tools import ssh_register_server as _fn
@@ -179,6 +180,7 @@ def _register_tools(mcp: Any, ctx: AppContext) -> None:
             password_env=password_env, jump_host=jump_host,
             host_key_policy=host_key_policy, default_cwd=default_cwd,
             max_sessions=max_sessions, keepalive_interval=keepalive_interval,
+            note=note,
         )
 
     @mcp.tool()

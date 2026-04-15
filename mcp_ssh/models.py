@@ -51,6 +51,7 @@ class ServerConfig(BaseModel):
     default_env:        dict[str, str] = Field(default_factory=dict)
     max_sessions:       int | None = None
     keepalive_interval: int | None = None
+    note:               str | None = None  # free-text: OS, role, permissions, etc.
 
 
 class GlobalSettings(BaseModel):

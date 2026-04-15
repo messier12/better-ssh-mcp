@@ -171,6 +171,8 @@ def app_config_to_toml(cfg: AppConfig) -> str:
             lines.append(f"max_sessions = {srv.max_sessions}")
         if srv.keepalive_interval is not None:
             lines.append(f"keepalive_interval = {srv.keepalive_interval}")
+        if srv.note is not None:
+            lines.append(f'note = "{srv.note}"')
         lines.append("")
 
     return "\n".join(lines)

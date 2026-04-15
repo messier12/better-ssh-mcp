@@ -107,6 +107,25 @@ def test_list_servers_multiple() -> None:
     assert len(result["servers"]) == 3
 
 
+def test_list_servers_includes_note_when_set() -> None:
+    cfg = ServerConfig(
+        name="noted", host="1.2.3.4", port=22, user="admin",
+        auth_type=AuthType.agent,
+        note="Windows 11, solan user, no sudo",
+    )
+    reg = _make_registry([cfg])
+    pool = _make_pool()
+    result = ssh_list_servers(reg, pool)
+    assert result["servers"][0]["note"] == "Windows 11, solan user, no sudo"
+
+
+def test_list_servers_note_is_none_when_unset() -> None:
+    reg = _make_registry([_cfg("s1")])
+    pool = _make_pool()
+    result = ssh_list_servers(reg, pool)
+    assert result["servers"][0]["note"] is None
+
+
 # ---------------------------------------------------------------------------
 # ssh_register_server
 # ---------------------------------------------------------------------------
@@ -126,6 +145,23 @@ def test_register_new_server() -> None:
     assert result["server"] == "new"
     reg.add.assert_called_once()
     audit.log.assert_called_once()
+
+
+def test_register_with_note() -> None:
+    reg = _make_registry()
+    audit = _make_audit()
+    result = ssh_register_server(
+        name="ci",
+        host="10.0.0.2",
+        user="solan",
+        auth_type="key",
+        registry=reg,
+        audit=audit,
+        note="Windows 11 CI runner",
+    )
+    assert result["registered"] is True
+    cfg_saved: ServerConfig = reg.add.call_args.args[0]
+    assert cfg_saved.note == "Windows 11 CI runner"
 
 
 def test_register_duplicate_returns_error() -> None:
