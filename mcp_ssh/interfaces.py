@@ -15,6 +15,7 @@ from .models import (
     ServerConfig,
     SessionRecord,
 )
+from .topology import TopologyResult
 
 
 @runtime_checkable
@@ -97,6 +98,8 @@ class IStateStore(Protocol):
     def list_sessions(
         self, server: str | None = None,
     ) -> list[SessionRecord]: ...
+    def get_topology(self) -> TopologyResult | None: ...
+    def set_topology(self, topology: TopologyResult) -> None: ...
 
 
 @runtime_checkable

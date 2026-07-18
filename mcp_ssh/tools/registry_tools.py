@@ -10,8 +10,14 @@ from ..exceptions import (
     ServerAlreadyExists,
     ServerNotFound,
 )
-from ..interfaces import IAuditLog, IConnectionPool, IRegistry
+from ..interfaces import IAuditLog, IConnectionPool, IRegistry, IStateStore
 from ..models import AuditEvent, ServerConfig
+from ..topology import (
+    LOCAL_NODE,
+    find_path,
+    path_gap_report,
+    scan_topology,
+)
 from ..utils import now
 
 
@@ -167,23 +173,36 @@ def _parse_hop(element: str) -> tuple[str, str | None, int | None]:
     return server_name, host_override, port_override
 
 
-def setup_jump(
+async def setup_jump(
     name: str,
-    chain: list[str],
+    chain: list[str] | None = None,
+    *,
     registry: IRegistry,
     audit: IAuditLog,
     persist: bool = False,
     note: str | None = None,
+    target: str | None = None,
+    pool: IConnectionPool | None = None,
+    state: IStateStore | None = None,
+    max_age: float | None = None,
+    force_rescan: bool = False,
 ) -> dict[str, Any]:
     """Create a jump-chain server *name* that tunnels through existing servers.
 
-    Each element of *chain* names an already-registered server whose
-    credentials (user, key, port, host-key policy) are reused — you never
-    respecify key paths. ``chain[0]`` is the first hop (directly reachable);
-    ``chain[-1]`` is the final target, exposed under *name*. Append
-    ``@host`` or ``@host:port`` to any element to override just the dial
-    address for that hop (needed when a host has a different address depending
-    on the vantage point, e.g. a WireGuard IP seen only from the prior hop).
+    Two modes:
+
+    **Manual (``chain=``)** — each element names an already-registered server
+    whose credentials (user, key, port, host-key policy) are reused. ``chain[0]``
+    is the first hop (directly reachable); ``chain[-1]`` is the final target,
+    exposed under *name*. Append ``@host`` or ``@host:port`` to any element to
+    override just the dial address for that hop (needed when a host has a
+    vantage-specific address, e.g. a WireGuard IP seen only from the prior hop).
+
+    **Auto (``target=``)** — pathfind a chain to registered server *target* over
+    the cached reachability matrix (see ``ssh_scan_topology``). Fewest hops wins,
+    latency as tiebreaker. Pass ``max_age`` (seconds) to reject a stale cache and
+    ``force_rescan=True`` to run a fresh scan first. The built alias is verified
+    with a real connect; on failure it is torn down. Requires *pool* and *state*.
 
     Ephemeral by default (in-memory, gone on restart, never written to
     servers.toml). Pass ``persist=True`` to write real config entries instead.
@@ -191,9 +210,37 @@ def setup_jump(
     Once created, *name* works with every SSH tool (ssh_exec, ssh_start_pty,
     ssh_get, …) transparently. Remove it with ``teardown_jump``.
     """
-    if not chain:
-        return {"error": "invalid_chain", "message": "chain must have at least one hop."}
+    if target is not None:
+        return await _setup_jump_auto(
+            name=name,
+            target=target,
+            registry=registry,
+            audit=audit,
+            pool=pool,
+            state=state,
+            persist=persist,
+            note=note,
+            max_age=max_age,
+            force_rescan=force_rescan,
+        )
 
+    if not chain:
+        return {
+            "error": "invalid_chain",
+            "message": "Provide either a non-empty 'chain' or a 'target'.",
+        }
+    return _build_chain(name, chain, registry, audit, persist, note)
+
+
+def _build_chain(
+    name: str,
+    chain: list[str],
+    registry: IRegistry,
+    audit: IAuditLog,
+    persist: bool,
+    note: str | None,
+) -> dict[str, Any]:
+    """Register the hops of *chain* under *name*, rolling back on any failure."""
     try:
         registry.get(name)
         return {
@@ -207,6 +254,9 @@ def setup_jump(
 
     total = len(chain)
     hops: list[ServerConfig] = []
+    # Parallel to *hops*: the underlying registered server name and host of each
+    # hop, so we can report whether the dial address was harvested vs registered.
+    hop_meta: list[tuple[str, str]] = []
     prev_name: str | None = None
     for i, element in enumerate(chain):
         server_name, host_override, port_override = _parse_hop(element)
@@ -218,6 +268,7 @@ def setup_jump(
                 "server": server_name,
                 "message": f"Chain hop {server_name!r} is not a registered server.",
             }
+        hop_meta.append((server_name, base.host))
         hop_name = _hop_name(name, i, total)
         hop_note = (
             note
@@ -257,8 +308,19 @@ def setup_jump(
         added.append(cfg.name)
 
     hop_summary = [
-        {"name": h.name, "target": f"{h.user}@{h.host}:{h.port}", "via": h.jump_host}
-        for h in hops
+        {
+            "name": h.name,
+            "node": server_name,
+            "target": f"{h.user}@{h.host}:{h.port}",
+            "via": h.host,
+            # The address dialed for this hop. "registered" if it matches the
+            # node's registered host; "harvested" if it is a vantage-specific
+            # address discovered by the scan (first-connect / tofu-trusted).
+            "via_source": "registered" if h.host == registered_host else "harvested",
+            # Preserve the previous-hop jump linkage (was previously "via").
+            "jump_host": h.jump_host,
+        }
+        for h, (server_name, registered_host) in zip(hops, hop_meta, strict=True)
     ]
     audit.log(
         AuditEvent(
@@ -278,6 +340,156 @@ def setup_jump(
         "ephemeral": not persist,
         "hops": hop_summary,
     }
+
+
+async def _setup_jump_auto(
+    name: str,
+    target: str,
+    registry: IRegistry,
+    audit: IAuditLog,
+    pool: IConnectionPool | None,
+    state: IStateStore | None,
+    persist: bool,
+    note: str | None,
+    max_age: float | None,
+    force_rescan: bool,
+) -> dict[str, Any]:
+    """Auto-build a chain to *target* by pathfinding over the cached matrix."""
+    if pool is None or state is None:
+        return {
+            "error": "unavailable",
+            "message": "Auto-chain (target=) requires the connection pool and state store.",
+        }
+
+    try:
+        registry.get(target)
+    except ServerNotFound:
+        return {
+            "error": "server_not_found",
+            "server": target,
+            "message": f"Target {target!r} is not a registered server.",
+        }
+
+    topology = state.get_topology()
+    if force_rescan:
+        # An explicit rescan is the only path that triggers a fresh scan.
+        topology = await scan_topology(registry, pool)
+        state.set_topology(topology)
+    elif topology is None:
+        return {
+            "error": "no_topology",
+            "message": (
+                "No cached topology available. Run ssh_scan_topology first, "
+                "or pass force_rescan=True to scan now."
+            ),
+        }
+    elif max_age is not None:
+        age = (now() - topology.scanned_at).total_seconds()
+        if age > max_age:
+            return {
+                "error": "stale_topology",
+                "message": (
+                    f"Cached topology is {age:.0f}s old (max_age={max_age:.0f}s). "
+                    "Re-run with force_rescan=True or call ssh_scan_topology."
+                ),
+                "scanned_at": topology.scanned_at.isoformat(),
+            }
+
+    path = find_path(topology, target)
+    if path is None:
+        return {
+            "error": "no_path",
+            "target": target,
+            "message": f"No reachable jump chain from {LOCAL_NODE!r} to {target!r}.",
+            "gap": path_gap_report(topology, target),
+        }
+
+    # Build chain elements as ``node@via`` using each hop's winning address from
+    # the previous vantage (harvested addresses are not in the registry).
+    chain = [f"{node}@{via}" for node, via in path]
+
+    build_result = _build_chain(name, chain, registry, audit, persist, note)
+    if "error" in build_result:
+        return build_result
+
+    # Verify with a real connect to the target through the built chain.
+    try:
+        await pool.get_connection(name)
+    except Exception as exc:  # noqa: BLE001 - any failure means a dead alias
+        teardown_jump(name, registry=registry, audit=audit)
+        return {
+            "error": "verify_failed",
+            "jump": name,
+            "target": target,
+            "chain": chain,
+            "message": f"Built chain to {target!r} but the verification connect failed: {exc}",
+        }
+
+    audit.log(
+        AuditEvent(
+            ts=now(),
+            tool="setup_jump",
+            server=name,
+            outcome="auto_chained",
+            detail={"target": target, "chain": chain},
+        )
+    )
+    build_result["target"] = target
+    build_result["auto_chain"] = chain
+    build_result["verified"] = True
+    return build_result
+
+
+async def ssh_scan_topology(
+    registry: IRegistry,
+    pool: IConnectionPool,
+    state: IStateStore,
+    audit: IAuditLog,
+    include: list[str] | None = None,
+    exclude: list[str] | None = None,
+    probe_timeout: float = 5.0,
+    harvest_timeout: float = 15.0,
+    force: bool = False,  # noqa: ARG001 - reserved; a scan is always fresh
+) -> dict[str, Any]:
+    """Probe server-to-server reachability and cache the resulting matrix.
+
+    For every ordered pair of registered servers (plus the synthetic ``local``
+    source), opens a direct-tcpip channel from the source to each of the
+    target's candidate addresses (its registered host plus harvested interface
+    IPs), from the source's own network vantage. Produces a directed N×N matrix
+    that ``setup_jump(target=...)`` can pathfind over.
+
+    ``include`` / ``exclude`` bound which servers are scanned (internal jump-chain
+    hops are always excluded). The full result is cached via the state store and
+    returned as a structured dict.
+    """
+    try:
+        topology = await scan_topology(
+            registry,
+            pool,
+            include=include,
+            exclude=exclude,
+            probe_timeout=probe_timeout,
+            harvest_timeout=harvest_timeout,
+        )
+    except McpSshError as exc:
+        return {"error": "scan_error", "message": str(exc)}
+    except Exception as exc:  # noqa: BLE001
+        return {"error": "unexpected_error", "message": str(exc)}
+
+    state.set_topology(topology)
+    audit.log(
+        AuditEvent(
+            ts=now(),
+            tool="ssh_scan_topology",
+            outcome="scanned",
+            detail={
+                "nodes": len(topology.nodes),
+                "edges": len(topology.edges),
+            },
+        )
+    )
+    return topology.model_dump(mode="json", by_alias=True)
 
 
 def teardown_jump(

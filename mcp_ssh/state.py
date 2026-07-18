@@ -9,10 +9,11 @@ from typing import Any
 
 from .exceptions import McpSshError
 from .models import GlobalSettings, ProcessRecord, ProcessStatus, SessionRecord
+from .topology import TopologyResult
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def _expand_path(raw: str) -> Path:
@@ -37,6 +38,7 @@ class StateStore:
         self._path: Path = _expand_path(self._settings.state_file)
         self._processes: dict[str, ProcessRecord] = {}
         self._sessions: dict[str, SessionRecord] = {}
+        self._topology: TopologyResult | None = None
 
     # ------------------------------------------------------------------
     # IStateStore interface
@@ -48,6 +50,7 @@ class StateStore:
             logger.warning("State file not found at %s; starting with empty state.", self._path)
             self._processes = {}
             self._sessions = {}
+            self._topology = None
             return
 
         try:
@@ -61,6 +64,7 @@ class StateStore:
             )
             self._processes = {}
             self._sessions = {}
+            self._topology = None
             return
 
         if not isinstance(data, dict):
@@ -69,6 +73,7 @@ class StateStore:
             )
             self._processes = {}
             self._sessions = {}
+            self._topology = None
             return
 
         file_version = data.get("schema_version", 1)
@@ -79,6 +84,7 @@ class StateStore:
             )
             self._processes = {}
             self._sessions = {}
+            self._topology = None
             return
 
         if file_version > SCHEMA_VERSION:
@@ -106,8 +112,26 @@ class StateStore:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Skipping corrupt session record %s: %s", sid, exc)
 
+        topology: TopologyResult | None = None
+        topo_data = data.get("topology")
+        if topo_data is not None:
+            try:
+                topology = TopologyResult.model_validate(topo_data)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Skipping corrupt topology record: %s", exc)
+
         self._processes = processes
         self._sessions = sessions
+        self._topology = topology
+
+    def get_topology(self) -> TopologyResult | None:
+        """Return the cached topology scan result, or None if none is stored."""
+        return self._topology
+
+    def set_topology(self, topology: TopologyResult) -> None:
+        """Store *topology* as the cached scan result and persist atomically."""
+        self._topology = topology
+        self._persist()
 
     def upsert_process(self, record: ProcessRecord) -> None:
         """Insert or update a process record, then persist atomically."""
@@ -160,6 +184,11 @@ class StateStore:
                 sid: json.loads(rec.model_dump_json())
                 for sid, rec in self._sessions.items()
             },
+            "topology": (
+                self._topology.model_dump(mode="json")
+                if self._topology is not None
+                else None
+            ),
         }
 
         existed = self._path.exists()

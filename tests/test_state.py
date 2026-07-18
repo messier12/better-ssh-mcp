@@ -2,8 +2,7 @@
 from __future__ import annotations
 
 import json
-import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -17,7 +16,6 @@ from mcp_ssh.models import (
     SessionRecord,
 )
 from mcp_ssh.state import SCHEMA_VERSION, StateStore
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -36,7 +34,7 @@ def _process(id: str = "p1", server: str = "myserver") -> ProcessRecord:
         remote_pid=12345,
         log_file="/tmp/p1.log",
         exit_file="/tmp/p1.exit",
-        started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        started_at=datetime(2026, 1, 1, tzinfo=UTC),
         status=ProcessStatus.running,
     )
 
@@ -47,7 +45,7 @@ def _session(id: str = "s1", server: str = "myserver") -> SessionRecord:
         server=server,
         command=None,
         use_tmux=False,
-        started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        started_at=datetime(2026, 1, 1, tzinfo=UTC),
         status=ProcessStatus.running,
     )
 
@@ -350,3 +348,84 @@ def test_state_file_created_with_0o600_permissions(tmp_path: Path) -> None:
     state_path = Path(settings.state_file)
     mode = state_path.stat().st_mode & 0o777
     assert mode == 0o600, f"Expected 0o600, got 0o{mode:03o}"
+
+
+# ---------------------------------------------------------------------------
+# Topology cache (schema v2)
+# ---------------------------------------------------------------------------
+
+def _topology() -> object:
+    from mcp_ssh.topology import TopologyEdge, TopologyNode, TopologyResult
+    from mcp_ssh.utils import now
+    node = TopologyNode(name="a", host="10.0.0.1", port=22, candidate_addrs=["10.0.0.1"])
+    edge = TopologyEdge(from_node="local", to_node="a", reachable=True, via="10.0.0.1")
+    return TopologyResult(scanned_at=now(), nodes=[node], edges=[edge],
+                          adjacency={"local": ["a"]})
+
+
+def test_schema_version_is_2() -> None:
+    assert SCHEMA_VERSION == 2
+
+
+def test_topology_roundtrip(tmp_path: Path) -> None:
+    from mcp_ssh.topology import TopologyResult
+    settings = _settings(tmp_path)
+    store = StateStore(settings)
+    topo = _topology()
+    store.set_topology(topo)  # type: ignore[arg-type]
+
+    # Reload from disk
+    store2 = StateStore(settings)
+    store2.load()
+    loaded = store2.get_topology()
+    assert isinstance(loaded, TopologyResult)
+    assert loaded.nodes[0].name == "a"
+    assert loaded.edges[0].from_node == "local"
+    assert loaded.edges[0].to_node == "a"
+    assert loaded.adjacency == {"local": ["a"]}
+
+
+def test_get_topology_none_when_never_set(tmp_path: Path) -> None:
+    store = StateStore(_settings(tmp_path))
+    store.load()
+    assert store.get_topology() is None
+
+
+def test_load_old_v1_file_without_topology_key(tmp_path: Path) -> None:
+    """An old schema_version=1 file with no 'topology' key must load cleanly."""
+    settings = _settings(tmp_path)
+    old = {
+        "schema_version": 1,
+        "processes": {},
+        "sessions": {},
+    }
+    Path(settings.state_file).write_text(json.dumps(old), encoding="utf-8")
+    store = StateStore(settings)
+    store.load()  # must not raise
+    assert store.get_topology() is None
+    assert store.list_processes() == []
+
+
+def test_load_tolerates_corrupt_topology(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    bad = {
+        "schema_version": 2,
+        "processes": {},
+        "sessions": {},
+        "topology": {"not": "a valid topology"},
+    }
+    Path(settings.state_file).write_text(json.dumps(bad), encoding="utf-8")
+    store = StateStore(settings)
+    store.load()  # must not raise
+    assert store.get_topology() is None
+
+
+def test_persist_keeps_topology_across_process_upserts(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    store = StateStore(settings)
+    store.set_topology(_topology())  # type: ignore[arg-type]
+    store.upsert_process(_process())
+    reloaded = StateStore(settings)
+    reloaded.load()
+    assert reloaded.get_topology() is not None
+    assert reloaded.get_process("p1") is not None
