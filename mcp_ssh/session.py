@@ -31,7 +31,7 @@ from .models import (
 from .utils import strip_ansi
 
 if TYPE_CHECKING:
-    from .interfaces import IAuditLog, IConnectionPool, IStateStore
+    from .interfaces import IAuditLog, IConnectionPool, IRegistry, IStateStore
 
 # Signal allowlist
 ALLOWED_SIGNALS = {
@@ -59,12 +59,16 @@ class SessionManager:
         audit: IAuditLog,
         settings: GlobalSettings | None = None,
         servers: dict[str, ServerConfig] | None = None,
+        registry: IRegistry | None = None,
     ) -> None:
         self._pool = pool
         self._state = state
         self._audit = audit
         self._settings = settings or GlobalSettings()
+        # Prefer the live registry (so runtime-registered servers get their
+        # per-server session cap); fall back to a static dict for tests.
         self._servers = servers or {}
+        self._registry = registry
 
         # In-memory state for live PTY processes (no-tmux path)
         self._pty_procs: dict[str, asyncssh.SSHClientProcess[str]] = {}
@@ -332,7 +336,13 @@ class SessionManager:
         """Open a PTY session on *server* and return its session_id."""
         # Check session cap
         per_server_limit: int | None = None
-        if server in self._servers:
+        if self._registry is not None:
+            from .exceptions import ServerNotFound
+            try:
+                per_server_limit = self._registry.get(server).max_sessions
+            except ServerNotFound:
+                per_server_limit = None
+        elif server in self._servers:
             per_server_limit = self._servers[server].max_sessions
         limit = per_server_limit if per_server_limit is not None else self._settings.max_sessions
 

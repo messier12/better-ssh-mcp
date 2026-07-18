@@ -788,3 +788,40 @@ async def test_close_unknown_name_noop() -> None:
 # ---------------------------------------------------------------------------
 
 _ = call  # suppress F401 if call ends up unused
+
+
+# ---------------------------------------------------------------------------
+# Live registry resolution (dynamic / ephemeral servers)
+# ---------------------------------------------------------------------------
+
+
+def test_pool_resolves_servers_added_after_construction() -> None:
+    """A pool built from a live registry sees servers registered later."""
+    from mcp_ssh.exceptions import ServerNotFound as _SNF
+
+    class _LiveLookup:
+        def __init__(self) -> None:
+            self._servers: dict[str, ServerConfig] = {}
+
+        def get(self, name: str) -> ServerConfig:
+            try:
+                return self._servers[name]
+            except KeyError:
+                raise _SNF(name) from None
+
+    lookup = _LiveLookup()
+    pool = ConnectionPool(lookup)  # type: ignore[arg-type]
+
+    # Unknown before registration.
+    with pytest.raises(ServerNotFound):
+        pool.get_status("late")
+
+    lookup._servers["late"] = _make_server(name="late", key_path="/k")
+    # Now visible without rebuilding the pool.
+    assert pool.get_status("late") == ConnectionStatus.disconnected
+
+
+def test_pool_get_status_unknown_raises() -> None:
+    pool = _make_pool()
+    with pytest.raises(ServerNotFound):
+        pool.get_status("ghost")

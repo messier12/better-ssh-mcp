@@ -38,14 +38,18 @@ def _build_app() -> tuple[Any, AppContext]:
     state.load()
 
     audit = AuditLog(app_config.settings)
-    pool = ConnectionPool(app_config.servers, app_config.settings)
+    # Pass the live registry (not a startup snapshot) so servers registered at
+    # runtime — including ephemeral jump chains — are visible immediately.
+    pool = ConnectionPool(registry, app_config.settings)
 
     session_manager = SessionManager(
         pool=pool,
         state=state,
         audit=audit,
         settings=app_config.settings,
-        servers=app_config.servers,
+        # Registry.watch is an async generator; the frozen IRegistry Protocol
+        # declares it as `async def`, so mypy sees a spurious signature conflict.
+        registry=registry,  # type: ignore[arg-type]
     )
 
     ctx = AppContext(
@@ -188,6 +192,34 @@ def _register_tools(mcp: Any, ctx: AppContext) -> None:
         """Deregister a previously registered SSH server."""
         from .tools.registry_tools import ssh_deregister_server as _fn
         return _fn(name=name, registry=ctx.registry, pool=ctx.pool, audit=ctx.audit)
+
+    @mcp.tool()
+    def setup_jump(  # type: ignore[return]
+        name: str,
+        chain: list[str],
+        persist: bool = False,
+        note: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a jump-chain server that tunnels through existing servers.
+
+        Each item in *chain* is a registered server name whose credentials are
+        reused; chain[0] is the first hop, chain[-1] the final target (exposed
+        as *name*). Append '@host' or '@host:port' to override a hop's dial
+        address (e.g. ["alibaba_das", "windows@11.11.0.4"]). Ephemeral by
+        default; pass persist=True to write it to servers.toml. Use *name* with
+        any SSH tool afterward; remove with teardown_jump.
+        """
+        from .tools.registry_tools import setup_jump as _fn
+        return _fn(
+            name=name, chain=chain, registry=ctx.registry, audit=ctx.audit,
+            persist=persist, note=note,
+        )
+
+    @mcp.tool()
+    def teardown_jump(name: str) -> dict[str, Any]:  # type: ignore[return]
+        """Remove a jump chain created by setup_jump (its alias and all hops)."""
+        from .tools.registry_tools import teardown_jump as _fn
+        return _fn(name=name, registry=ctx.registry, audit=ctx.audit)
 
     @mcp.tool()
     async def ssh_add_known_host(name: str) -> dict[str, Any]:  # type: ignore[return]

@@ -1,11 +1,13 @@
 """MCP tools for server registry management (T3a)."""
 from __future__ import annotations
 
+import contextlib
 import os
 from typing import Any
 
 from ..exceptions import (
     McpSshError,
+    ServerAlreadyExists,
     ServerNotFound,
 )
 from ..interfaces import IAuditLog, IConnectionPool, IRegistry
@@ -133,6 +135,194 @@ def ssh_register_server(
         "user": user,
         "auth_type": auth_type,
     }
+
+
+def _hop_name(alias: str, index: int, total: int) -> str:
+    """Return the registry name for hop *index* of a jump chain.
+
+    The final hop is exposed under the user-facing *alias*; intermediate hops
+    get generated names so a chain can be torn down as a unit.
+    """
+    return alias if index == total - 1 else f"_{alias}_hop{index}"
+
+
+def _parse_hop(element: str) -> tuple[str, str | None, int | None]:
+    """Parse a chain element ``"server"`` / ``"server@host"`` / ``"server@host:port"``.
+
+    Returns ``(server_name, host_override, port_override)``. The override values
+    are ``None`` when not supplied.
+    """
+    server_part, _, addr = element.partition("@")
+    server_name = server_part.strip()
+    host_override: str | None = None
+    port_override: int | None = None
+    addr = addr.strip()
+    if addr:
+        host_str, sep, port_str = addr.rpartition(":")
+        if sep and port_str.isdigit():
+            host_override = host_str.strip()
+            port_override = int(port_str)
+        else:
+            host_override = addr
+    return server_name, host_override, port_override
+
+
+def setup_jump(
+    name: str,
+    chain: list[str],
+    registry: IRegistry,
+    audit: IAuditLog,
+    persist: bool = False,
+    note: str | None = None,
+) -> dict[str, Any]:
+    """Create a jump-chain server *name* that tunnels through existing servers.
+
+    Each element of *chain* names an already-registered server whose
+    credentials (user, key, port, host-key policy) are reused — you never
+    respecify key paths. ``chain[0]`` is the first hop (directly reachable);
+    ``chain[-1]`` is the final target, exposed under *name*. Append
+    ``@host`` or ``@host:port`` to any element to override just the dial
+    address for that hop (needed when a host has a different address depending
+    on the vantage point, e.g. a WireGuard IP seen only from the prior hop).
+
+    Ephemeral by default (in-memory, gone on restart, never written to
+    servers.toml). Pass ``persist=True`` to write real config entries instead.
+
+    Once created, *name* works with every SSH tool (ssh_exec, ssh_start_pty,
+    ssh_get, …) transparently. Remove it with ``teardown_jump``.
+    """
+    if not chain:
+        return {"error": "invalid_chain", "message": "chain must have at least one hop."}
+
+    try:
+        registry.get(name)
+        return {
+            "error": "server_already_exists",
+            "server": name,
+            "message": f"Server {name!r} already exists. Pick another jump name "
+            "or tear it down first.",
+        }
+    except ServerNotFound:
+        pass
+
+    total = len(chain)
+    hops: list[ServerConfig] = []
+    prev_name: str | None = None
+    for i, element in enumerate(chain):
+        server_name, host_override, port_override = _parse_hop(element)
+        try:
+            base = registry.get(server_name)
+        except ServerNotFound:
+            return {
+                "error": "server_not_found",
+                "server": server_name,
+                "message": f"Chain hop {server_name!r} is not a registered server.",
+            }
+        hop_name = _hop_name(name, i, total)
+        hop_note = (
+            note
+            if (note and i == total - 1)
+            else f"jump chain {name!r} hop {i} via {server_name}"
+        )
+        hops.append(
+            base.model_copy(
+                update={
+                    "name": hop_name,
+                    "host": host_override or base.host,
+                    "port": port_override or base.port,
+                    "jump_host": prev_name,
+                    "note": hop_note,
+                }
+            )
+        )
+        prev_name = hop_name
+
+    # Register all hops, rolling back on any collision so we never leave a
+    # half-built chain behind.
+    add = registry.add if persist else registry.add_ephemeral  # type: ignore[attr-defined]
+    remove = registry.remove if persist else registry.remove_ephemeral  # type: ignore[attr-defined]
+    added: list[str] = []
+    for cfg in hops:
+        try:
+            add(cfg)
+        except (ServerAlreadyExists, McpSshError) as exc:
+            for done in reversed(added):
+                with contextlib.suppress(McpSshError):
+                    remove(done)
+            return {
+                "error": "registry_error",
+                "server": cfg.name,
+                "message": f"Failed to build jump chain: {exc}",
+            }
+        added.append(cfg.name)
+
+    hop_summary = [
+        {"name": h.name, "target": f"{h.user}@{h.host}:{h.port}", "via": h.jump_host}
+        for h in hops
+    ]
+    audit.log(
+        AuditEvent(
+            ts=now(),
+            tool="setup_jump",
+            server=name,
+            outcome="created",
+            detail={
+                "persist": persist,
+                "hops": [h["target"] for h in hop_summary],
+            },
+        )
+    )
+    return {
+        "jump": name,
+        "persist": persist,
+        "ephemeral": not persist,
+        "hops": hop_summary,
+    }
+
+
+def teardown_jump(
+    name: str,
+    registry: IRegistry,
+    audit: IAuditLog,
+) -> dict[str, Any]:
+    """Remove a jump chain created by ``setup_jump`` (the alias + its hops).
+
+    Removes both ephemeral and persisted entries. Safe to call whether the
+    chain was created ephemeral or persisted.
+    """
+    prefix = f"_{name}_hop"
+    targets = [
+        cfg.name
+        for cfg in registry.list_all()
+        if cfg.name == name or cfg.name.startswith(prefix)
+    ]
+    if not targets:
+        return {
+            "error": "server_not_found",
+            "server": name,
+            "message": f"No jump chain named {name!r} found.",
+        }
+
+    removed: list[str] = []
+    for target in targets:
+        for remover in (registry.remove_ephemeral, registry.remove):  # type: ignore[attr-defined]
+            try:
+                remover(target)
+                removed.append(target)
+                break
+            except (ServerNotFound, McpSshError):
+                continue
+
+    audit.log(
+        AuditEvent(
+            ts=now(),
+            tool="teardown_jump",
+            server=name,
+            outcome="removed",
+            detail={"removed": removed},
+        )
+    )
+    return {"torn_down": name, "removed": removed}
 
 
 def ssh_deregister_server(

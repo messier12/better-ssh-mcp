@@ -3,12 +3,22 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 import asyncssh
 
 from .exceptions import AuthError, HostKeyError, ServerNotFound
 from .models import AuthType, ConnectionStatus, GlobalSettings, HostKeyPolicy, ServerConfig
+
+
+@runtime_checkable
+class _ServerLookup(Protocol):
+    """Anything that can resolve a server name to a ``ServerConfig``.
+
+    Both the live ``Registry`` and ``_StaticServerLookup`` satisfy this.
+    """
+
+    def get(self, name: str) -> ServerConfig: ...
 
 
 class _ConnectionEntry:
@@ -17,6 +27,23 @@ class _ConnectionEntry:
     def __init__(self) -> None:
         self.connection: asyncssh.SSHClientConnection | None = None
         self.status: ConnectionStatus = ConnectionStatus.disconnected
+
+
+class _StaticServerLookup:
+    """Adapt a plain ``dict`` of servers to the ``.get()`` lookup the pool needs.
+
+    Lets callers (and tests) construct a pool from a fixed dict while the pool
+    internally always resolves servers through a live ``.get(name)`` call.
+    """
+
+    def __init__(self, servers: dict[str, ServerConfig]) -> None:
+        self._servers = servers
+
+    def get(self, name: str) -> ServerConfig:
+        try:
+            return self._servers[name]
+        except KeyError:
+            raise ServerNotFound(f"Unknown server: {name!r}") from None
 
 
 def _make_tofu_known_hosts(
@@ -120,14 +147,27 @@ class ConnectionPool:
 
     def __init__(
         self,
-        servers: dict[str, ServerConfig],
+        servers: dict[str, ServerConfig] | _ServerLookup,
         settings: GlobalSettings | None = None,
     ) -> None:
-        self._servers = servers
+        # Resolve servers through a live ``.get(name)`` so that dynamically
+        # registered / ephemeral servers are visible without restarting.
+        # A plain dict is wrapped for backward compatibility.
+        self._lookup: _ServerLookup = (
+            _StaticServerLookup(servers) if isinstance(servers, dict) else servers
+        )
         self._settings = settings or GlobalSettings()
-        self._entries: dict[str, _ConnectionEntry] = {
-            name: _ConnectionEntry() for name in servers
-        }
+        # Connection slots are created lazily on first use so servers added
+        # after construction are supported.
+        self._entries: dict[str, _ConnectionEntry] = {}
+
+    def _entry(self, name: str) -> _ConnectionEntry:
+        """Return (creating if needed) the connection slot for *name*."""
+        entry = self._entries.get(name)
+        if entry is None:
+            entry = _ConnectionEntry()
+            self._entries[name] = entry
+        return entry
 
     # ------------------------------------------------------------------
     # IConnectionPool interface
@@ -141,10 +181,10 @@ class ConnectionPool:
             AuthError: for authentication configuration problems.
             HostKeyError: if the host key has changed.
         """
-        if name not in self._servers:
-            raise ServerNotFound(f"Unknown server: {name!r}")
+        # Resolve now so unknown servers fail fast with ServerNotFound.
+        self._lookup.get(name)
 
-        entry = self._entries[name]
+        entry = self._entry(name)
 
         if entry.status == ConnectionStatus.connected and entry.connection is not None:
             if not entry.connection.is_closed():
@@ -193,9 +233,13 @@ class ConnectionPool:
 
     def get_status(self, name: str) -> ConnectionStatus:
         """Return the current connection status for *name*."""
-        if name not in self._entries:
-            raise ServerNotFound(f"Unknown server: {name!r}")
-        return self._entries[name].status
+        entry = self._entries.get(name)
+        if entry is None:
+            # No live slot yet: report disconnected if the server is known,
+            # otherwise surface ServerNotFound.
+            self._lookup.get(name)
+            return ConnectionStatus.disconnected
+        return entry.status
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -209,7 +253,7 @@ class ConnectionPool:
 
     async def _connect(self, name: str) -> asyncssh.SSHClientConnection:
         """Build kwargs and call asyncssh.connect for *name*."""
-        cfg = self._servers[name]
+        cfg = self._lookup.get(name)
         kwargs = await self._build_connect_kwargs(cfg)
         conn, _ = await asyncssh.create_connection(
             lambda: _DisconnectTracker(lambda: self._on_close(name)),
