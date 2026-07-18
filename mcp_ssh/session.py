@@ -28,6 +28,7 @@ from .models import (
     ServerConfig,
     SessionRecord,
 )
+from .utils import strip_ansi
 
 if TYPE_CHECKING:
     from .interfaces import IAuditLog, IConnectionPool, IStateStore
@@ -70,6 +71,9 @@ class SessionManager:
         self._pty_buffers: dict[str, collections.deque[bytes]] = {}
         self._drain_tasks: dict[str, asyncio.Task[None]] = {}
 
+        # Per-server cache: "stdbuf" | "script" | "none"
+        self._flush_wrappers: dict[str, str] = {}
+
         # In-memory state for tmux sessions
         self._tmux_logs: dict[str, str] = {}
         self._tmux_sessions: dict[str, str] = {}
@@ -78,6 +82,39 @@ class SessionManager:
     # ------------------------------------------------------------------
     # Process (nohup exec) interface
     # ------------------------------------------------------------------
+
+    async def _detect_flush_wrapper(
+        self, server: str, conn: asyncssh.SSHClientConnection
+    ) -> str:
+        """Return the best stdout line-buffering wrapper for *server* ("stdbuf"|"script"|"none").
+
+        Result is cached per server after the first detection.
+        Windows servers (no uname) always return "none".
+        """
+        if server in self._flush_wrappers:
+            return self._flush_wrappers[server]
+
+        uname_result = await conn.run("uname -s 2>/dev/null || echo _unknown_")
+        uname = (uname_result.stdout or "").strip().lower()
+        if not uname or uname == "_unknown_" or any(
+            tok in uname for tok in ("windows", "mingw", "cygwin")
+        ):
+            self._flush_wrappers[server] = "none"
+            return "none"
+
+        check = await conn.run(
+            "(which stdbuf 2>/dev/null && echo stdbuf) || "
+            "(which script 2>/dev/null && echo script) || echo none"
+        )
+        last_line = (check.stdout or "none").strip().splitlines()[-1]
+        if "stdbuf" in last_line:
+            wrapper = "stdbuf"
+        elif "script" in last_line:
+            wrapper = "script"
+        else:
+            wrapper = "none"
+        self._flush_wrappers[server] = wrapper
+        return wrapper
 
     async def start_process(
         self,
@@ -95,7 +132,18 @@ class SessionManager:
             f"{shlex.quote(k)}={shlex.quote(v)}" for k, v in (env or {}).items()
         )
         cd_part = f"cd {shlex.quote(cwd)} && " if cwd else ""
-        inner = cd_part + (env_exports + " " if env_exports else "") + command
+
+        conn = await self._pool.get_connection(server)
+        wrapper = await self._detect_flush_wrapper(server, conn)
+        if wrapper == "stdbuf":
+            exec_command = f"stdbuf -oL -eL bash -c {shlex.quote(command)}"
+        elif wrapper == "script":
+            exec_command = f"script -q /dev/null -c {shlex.quote(command)}"
+        else:
+            exec_command = command
+
+        inner = cd_part + (env_exports + " " if env_exports else "") + exec_command
+
         # BUG-1 fix: inner includes the exit-code capture so the whole nohup is
         # backgrounded with & and echo $! captures nohup's PID, not a subshell.
         # Wrap inner in (...) so that a user `exit N` only exits the subshell;
@@ -106,7 +154,6 @@ class SessionManager:
             f"> {log_file} 2>&1 & echo $!"
         )
 
-        conn = await self._pool.get_connection(server)
         result = await conn.run(remote_cmd)
         stdout = (result.stdout or "").strip()
         try:
@@ -146,9 +193,13 @@ class SessionManager:
         return process_id
 
     async def read_process(
-        self, process_id: str, max_bytes: int = 65536
+        self, process_id: str, max_bytes: int = 65536, offset: int = 0
     ) -> ProcessOutput:
-        """Return current log output and status for *process_id*."""
+        """Return log output starting at *offset* bytes and status for *process_id*.
+
+        Use ``offset=0`` for the full tail (backward-compatible default).
+        Pass the ``next_offset`` from a previous call to read only new output.
+        """
         record = self._state.get_process(process_id)
         if record is None:
             raise ProcessNotFound(f"Process {process_id!r} not found")
@@ -157,8 +208,10 @@ class SessionManager:
         exit_result = await conn.run(
             f"test -f {record.exit_file} && cat {record.exit_file} || true"
         )
+        # tail -c +N is 1-based: +1 = from beginning, +(offset+1) = skip first offset bytes
         log_result = await conn.run(
-            f"tail -c {max_bytes} {record.log_file} 2>/dev/null || true"
+            f"tail -c +{offset + 1} {record.log_file} 2>/dev/null "
+            f"| head -c {max_bytes} || true"
         )
 
         exit_stdout = (exit_result.stdout or "").strip()
@@ -414,25 +467,34 @@ class SessionManager:
                     break
             proc = self._pty_procs.get(session_id)
             alive = proc is not None and not proc.is_closing()
-            output = collected.decode("utf-8", errors="replace")
+            output = strip_ansi(collected.decode("utf-8", errors="replace"))
             return PtyOutput(output=output, alive=alive)
 
-        # tmux path
-        log_file = self._tmux_logs.get(session_id, "")
+        # tmux path — use capture-pane for clean rendered text (no escape codes,
+        # correct spacing) rather than tailing the raw pipe-pane log.
         tmux_session = self._tmux_sessions.get(session_id, "")
         conn = self._tmux_conns.get(session_id)
         if conn is None:
             return PtyOutput(output="", alive=False)
 
-        log_result = await conn.run(
-            f"tail -c {max_bytes} {log_file} 2>/dev/null || true"
+        # -p: print to stdout; -J: join wrapped lines; -S -2000: include 2000
+        # lines of scrollback so history isn't lost.
+        cap_result = await conn.run(
+            f"tmux capture-pane -p -J -S -2000 -t {shlex.quote(tmux_session)} "
+            f"2>/dev/null || true"
         )
         alive_result = await conn.run(
             f"tmux has-session -t {shlex.quote(tmux_session)} 2>/dev/null "
             f"&& echo alive || echo dead"
         )
         alive = str(alive_result.stdout or "").strip() == "alive"
-        output = str(log_result.stdout or "")
+        output = str(cap_result.stdout or "")
+        # capture-pane output is already plain text, but strip any residual
+        # escape codes and normalize line endings for safety.
+        output = strip_ansi(output)
+        # Honour max_bytes after decoding (capture-pane has no byte limit).
+        if len(output.encode()) > max_bytes:
+            output = output.encode()[:max_bytes].decode("utf-8", errors="replace")
         return PtyOutput(output=output, alive=alive)
 
     async def pty_write(self, session_id: str, data: str) -> None:

@@ -135,7 +135,12 @@ def test_isinstance_isessionmanager() -> None:
 
 @pytest.mark.asyncio
 async def test_start_process_happy_path() -> None:
-    conn = _make_conn(run_return=_run_result("99999\n"))
+    # conn.run is called 3 times: uname detect, wrapper detect, nohup launch
+    conn = _make_conn(run_side_effect=[
+        _run_result("Linux\n"),   # uname -s
+        _run_result("stdbuf\n"),  # which stdbuf
+        _run_result("99999\n"),   # nohup & echo $!
+    ])
     mgr, pool, state, audit, _ = _make_manager(conn=conn)
 
     pid_str = await mgr.start_process("myserver", "echo hi", cwd="/home/user", env={"FOO": "bar"})
@@ -144,12 +149,14 @@ async def test_start_process_happy_path() -> None:
     assert isinstance(pid_str, str)
     assert len(pid_str) == 36  # UUID4 format
 
-    # conn.run was called
-    conn.run.assert_awaited_once()
-    cmd_arg: str = conn.run.call_args[0][0]
+    # conn.run called at least 3 times; the last call is the nohup command
+    assert conn.run.await_count >= 3
+    cmd_arg: str = conn.run.call_args_list[-1][0][0]
     # cwd and env should be shell-quoted
     assert "cd '/home/user'" in cmd_arg or "cd /home/user" in cmd_arg
     assert "FOO=" in cmd_arg
+    # stdbuf wrapping applied
+    assert "stdbuf" in cmd_arg
 
     # state upserted
     state.upsert_process.assert_called_once()

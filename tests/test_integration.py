@@ -179,13 +179,13 @@ async def full_stack(pool_with_server: tuple, tmp_path: Path):  # type: ignore[n
 # ---------------------------------------------------------------------------
 
 def test_integration_list_servers_empty(tmp_path: Path) -> None:
-    """ssh_list_servers returns empty list when no servers are registered."""
+    """ssh_list_servers returns sentinel string when no servers are registered."""
     pool = MagicMock()
     pool.get_status.side_effect = Exception("no servers")
     reg = MagicMock()
     reg.list_all.return_value = []
     result = ssh_list_servers(reg, pool)
-    assert result == {"servers": []}
+    assert result == "no servers registered"
 
 
 def test_integration_register_and_list(tmp_path: Path) -> None:
@@ -212,8 +212,8 @@ def test_integration_register_and_list(tmp_path: Path) -> None:
     assert reg_result["registered"] is True
 
     list_result = ssh_list_servers(registry, pool)
-    assert len(list_result["servers"]) == 1
-    assert list_result["servers"][0]["name"] == "s1"
+    assert isinstance(list_result, str)
+    assert "s1" in list_result
 
 
 def test_integration_deregister(tmp_path: Path) -> None:
@@ -233,7 +233,7 @@ def test_integration_deregister(tmp_path: Path) -> None:
     )
     result = ssh_deregister_server("s1", registry, pool, audit)
     assert result["deregistered"] is True
-    assert len(ssh_list_servers(registry, pool)["servers"]) == 0
+    assert ssh_list_servers(registry, pool) == "no servers registered"
 
 
 # ---------------------------------------------------------------------------
@@ -315,9 +315,9 @@ def test_integration_list_processes_empty_for_unknown_server() -> None:
 # ---------------------------------------------------------------------------
 
 def test_server_registers_18_tools(tmp_path: Path) -> None:
-    """_register_tools creates exactly 21 tool registrations on the MCP app.
+    """_register_tools creates exactly 22 tool registrations on the MCP app.
 
-    Tool count: 5 registry + 7 exec + 6 PTY + 3 SCP (get/put/transfer) = 21.
+    Tool count: 5 registry + 7 exec + 6 PTY + 4 SCP (get/put/transfer/sync) = 22.
     """
     from mcp_ssh.server import _register_tools, AppContext
 
@@ -334,8 +334,8 @@ def test_server_registers_18_tools(tmp_path: Path) -> None:
     )
     _register_tools(mcp, ctx)
 
-    # mcp.tool() should have been called 21 times (5 registry + 7 exec + 6 PTY + 3 SCP)
-    assert mcp.tool.call_count == 21
+    # mcp.tool() should have been called 22 times (5 registry + 7 exec + 6 PTY + 4 SCP)
+    assert mcp.tool.call_count == 22
 
 
 # ---------------------------------------------------------------------------

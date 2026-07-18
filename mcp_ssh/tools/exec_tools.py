@@ -9,7 +9,7 @@ from typing import Any
 from ..exceptions import McpSshError, ProcessNotFound, ServerNotFound
 from ..interfaces import IAuditLog, IConnectionPool, IRegistry, ISessionManager
 from ..models import AuditEvent
-from ..utils import now
+from ..utils import now, strip_ansi
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +106,7 @@ async def ssh_exec(
     except Exception as exc:  # noqa: BLE001
         return {"error": "unexpected_error", "server": server, "message": str(exc)}
 
-    output = str(result.stdout or "") + str(result.stderr or "")
+    output = strip_ansi(str(result.stdout or "") + str(result.stderr or ""))
     exit_code: int = result.exit_status if result.exit_status is not None else -1
 
     audit.log(
@@ -162,14 +162,21 @@ async def ssh_read_process(
     process_id: str,
     session_manager: ISessionManager,
     max_bytes: int = 65536,
+    offset: int = 0,
 ) -> dict[str, Any]:
     """Read buffered output from a background process.
 
-    Returns ``{output, running, exit_code, remote_pid, server}``
+    Pass *offset=0* (default) to read the full available output.
+    Pass the ``next_offset`` from a previous response to read only new output,
+    avoiding duplicate or missing lines across successive calls.
+
+    Returns ``{output, next_offset, running, exit_code, remote_pid, server}``
     or a structured error if *process_id* is unknown.
     """
     try:
-        out = await session_manager.read_process(process_id, max_bytes=max_bytes)
+        out = await session_manager.read_process(
+            process_id, max_bytes=max_bytes, offset=offset
+        )
     except ProcessNotFound:
         return {
             "error": "process_not_found",
@@ -179,8 +186,10 @@ async def ssh_read_process(
     except McpSshError as exc:
         return {"error": "read_error", "process_id": process_id, "message": str(exc)}
 
+    next_offset = offset + len(out.output.encode())
     return {
         "output": out.output,
+        "next_offset": next_offset,
         "running": out.running,
         "exit_code": out.exit_code,
         "remote_pid": out.remote_pid,

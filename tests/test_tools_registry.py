@@ -74,7 +74,7 @@ def test_list_servers_empty() -> None:
     reg = _make_registry()
     pool = _make_pool()
     result = ssh_list_servers(reg, pool)
-    assert result == {"servers": []}
+    assert result == "no servers registered"
 
 
 def test_list_servers_shows_status() -> None:
@@ -82,11 +82,10 @@ def test_list_servers_shows_status() -> None:
     reg = _make_registry([cfg])
     pool = _make_pool(ConnectionStatus.connected)
     result = ssh_list_servers(reg, pool)
-    assert len(result["servers"]) == 1
-    entry = result["servers"][0]
-    assert entry["name"] == "s1"
-    assert entry["status"] == "connected"
-    assert entry["host"] == "1.2.3.4"
+    assert isinstance(result, str)
+    assert "s1" in result
+    assert "connected" in result
+    assert "1.2.3.4" in result
 
 
 def test_list_servers_unknown_from_pool() -> None:
@@ -96,7 +95,8 @@ def test_list_servers_unknown_from_pool() -> None:
     pool = MagicMock()
     pool.get_status.side_effect = ServerNotFound("nope")
     result = ssh_list_servers(reg, pool)
-    assert result["servers"][0]["status"] == "unknown"
+    assert isinstance(result, str)
+    assert "unknown" in result
 
 
 def test_list_servers_multiple() -> None:
@@ -104,7 +104,8 @@ def test_list_servers_multiple() -> None:
     reg = _make_registry(cfgs)
     pool = _make_pool()
     result = ssh_list_servers(reg, pool)
-    assert len(result["servers"]) == 3
+    assert isinstance(result, str)
+    assert result.count("\n") == 2  # 3 lines → 2 newlines
 
 
 def test_list_servers_includes_note_when_set() -> None:
@@ -116,14 +117,16 @@ def test_list_servers_includes_note_when_set() -> None:
     reg = _make_registry([cfg])
     pool = _make_pool()
     result = ssh_list_servers(reg, pool)
-    assert result["servers"][0]["note"] == "Windows 11, solan user, no sudo"
+    assert isinstance(result, str)
+    assert "Windows 11, solan user, no sudo" in result
 
 
 def test_list_servers_note_is_none_when_unset() -> None:
     reg = _make_registry([_cfg("s1")])
     pool = _make_pool()
     result = ssh_list_servers(reg, pool)
-    assert result["servers"][0]["note"] is None
+    assert isinstance(result, str)
+    assert "#" not in result  # no note column when note is absent
 
 
 # ---------------------------------------------------------------------------

@@ -143,12 +143,13 @@ def _register_tools(mcp: Any, ctx: AppContext) -> None:
     from .tools.registry_tools import async_ssh_add_known_host
     from .tools.scp_tools import ssh_get as ssh_get_fn
     from .tools.scp_tools import ssh_put as ssh_put_fn
+    from .tools.scp_tools import ssh_sync as ssh_sync_fn
     from .tools.scp_tools import ssh_transfer as ssh_transfer_fn
 
     # --- Registry tools (T3a) ---
 
-    @mcp.tool()
-    def ssh_list_servers() -> dict[str, Any]:  # type: ignore[return]
+    @mcp.tool(structured_output=False)
+    def ssh_list_servers() -> str:
         """List all registered SSH servers and their connection statuses."""
         from .tools.registry_tools import ssh_list_servers as _fn
         return _fn(registry=ctx.registry, pool=ctx.pool)
@@ -234,12 +235,18 @@ def _register_tools(mcp: Any, ctx: AppContext) -> None:
     async def ssh_read_process(  # type: ignore[return]
         process_id: str,
         max_bytes: int = 65536,
+        offset: int = 0,
     ) -> dict[str, Any]:
-        """Read buffered output from a background process."""
+        """Read buffered output from a background process.
+
+        Pass *offset=0* (default) to read from the beginning.
+        Pass the ``next_offset`` from a previous response to read only new output.
+        """
         return await ssh_read_process_fn(
             process_id=process_id,
             session_manager=ctx.session_manager,
             max_bytes=max_bytes,
+            offset=offset,
         )
 
     @mcp.tool()
@@ -377,6 +384,34 @@ def _register_tools(mcp: Any, ctx: AppContext) -> None:
             src_server=src_server, src_path=src_path,
             dst_server=dst_server, dst_path=dst_path,
             recurse=recurse, preserve=preserve,
+            registry=ctx.registry, pool=ctx.pool, audit=ctx.audit,
+        )
+
+    @mcp.tool()
+    async def ssh_sync(  # type: ignore[return]
+        src_server: str,
+        src_path: str,
+        dst_server: str,
+        dst_path: str,
+        delete: bool = False,
+        preserve: bool = False,
+    ) -> dict[str, Any]:
+        """Sync files from one server to another, copying only changed files.
+
+        *src_path* may be a directory or a glob pattern (e.g. ``/data/*.csv``).
+
+        Same-server syncs use ``rsync`` if available, otherwise ``cp -u``.
+        Cross-server syncs compare file size and mtime via SFTP and copy only
+        what differs — works with Windows servers (no rsync dependency).
+
+        Set *delete=True* to remove destination files absent from the source.
+
+        Returns ``{copied, skipped, deleted, method}`` plus server/path info.
+        """
+        return await ssh_sync_fn(
+            src_server=src_server, src_path=src_path,
+            dst_server=dst_server, dst_path=dst_path,
+            delete=delete, preserve=preserve,
             registry=ctx.registry, pool=ctx.pool, audit=ctx.audit,
         )
 

@@ -16,32 +16,36 @@ from ..utils import now
 def ssh_list_servers(
     registry: IRegistry,
     pool: IConnectionPool,
-) -> dict[str, Any]:
+) -> str:
     """List all registered SSH servers and their connection status.
 
-    Returns a structured dict with a ``servers`` list.
-    Each entry includes name, host, port, user, auth_type, and connection status.
+    Returns a compact plain-text table: one server per line with columns
+    NAME, USER@HOST:PORT, AUTH, STATUS, and an optional note.
     """
     servers = registry.list_all()
-    result = []
+    if not servers:
+        return "no servers registered"
+
+    rows: list[tuple[str, str, str, str, str]] = []
     for cfg in servers:
         try:
-            status = pool.get_status(cfg.name)
-            status_value = status.value
+            status_value = pool.get_status(cfg.name).value
         except ServerNotFound:
             status_value = "unknown"
-        result.append(
-            {
-                "name": cfg.name,
-                "host": cfg.host,
-                "port": cfg.port,
-                "user": cfg.user,
-                "auth_type": cfg.auth_type.value,
-                "status": status_value,
-                "note": cfg.note,
-            }
-        )
-    return {"servers": result}
+
+        port_suffix = f":{cfg.port}" if cfg.port != 22 else ""
+        target = f"{cfg.user}@{cfg.host}{port_suffix}"
+        note = f"# {cfg.note}" if cfg.note else ""
+        rows.append((cfg.name, target, cfg.auth_type.value, status_value, note))
+
+    # Column widths from data (no header — columns are self-evident)
+    w = [max(len(r[i]) for r in rows) for i in range(5)]
+    lines = [
+        f"{name:<{w[0]}}  {target:<{w[1]}}  {auth:<{w[2]}}  {status:<{w[3]}}"
+        + (f"  {note}" if note else "")
+        for name, target, auth, status, note in rows
+    ]
+    return "\n".join(lines)
 
 
 def ssh_register_server(

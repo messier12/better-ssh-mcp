@@ -44,7 +44,7 @@ class ISessionManager(Protocol):
     ) -> str: ...   # returns process_id
 
     async def read_process(
-        self, process_id: str, max_bytes: int = 65536,
+        self, process_id: str, max_bytes: int = 65536, offset: int = 0,
     ) -> ProcessOutput: ...
 
     async def write_process(self, process_id: str, data: str) -> None: ...
