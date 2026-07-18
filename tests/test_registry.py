@@ -324,3 +324,64 @@ def test_registry_raises_on_circular_jump(tmp_path: Path) -> None:
     p.write_text(toml, encoding="utf-8")
     with pytest.raises(McpSshError, match="Circular jump-host chain"):
         Registry(p)
+
+
+# ---------------------------------------------------------------------------
+# Ephemeral (in-memory) overlay
+# ---------------------------------------------------------------------------
+
+
+def test_add_ephemeral_visible_via_get_and_list(registry: Registry) -> None:
+    eph = _make_server("scratch")
+    registry.add_ephemeral(eph)
+    assert registry.get("scratch") is eph
+    names = {s.name for s in registry.list_all()}
+    assert names == {"dev", "prod", "scratch"}
+
+
+def test_ephemeral_not_written_to_file(registry: Registry, config_file: Path) -> None:
+    registry.add_ephemeral(_make_server("scratch"))
+    assert "scratch" not in config_file.read_text(encoding="utf-8")
+
+
+def test_ephemeral_takes_precedence_over_file(registry: Registry) -> None:
+    override = ServerConfig(
+        name="dev", host="overridden.example.com", user="root", auth_type=AuthType.agent
+    )
+    # dev exists in the file; ephemeral with same name shadows it only if the
+    # collision guard allows — it must NOT, names must be unique.
+    with pytest.raises(ServerAlreadyExists):
+        registry.add_ephemeral(override)
+
+
+def test_add_ephemeral_rejects_duplicate(registry: Registry) -> None:
+    registry.add_ephemeral(_make_server("scratch"))
+    with pytest.raises(ServerAlreadyExists):
+        registry.add_ephemeral(_make_server("scratch"))
+
+
+def test_file_add_rejects_ephemeral_name_collision(registry: Registry) -> None:
+    registry.add_ephemeral(_make_server("scratch"))
+    with pytest.raises(ServerAlreadyExists):
+        registry.add(_make_server("scratch"))
+
+
+def test_remove_ephemeral(registry: Registry) -> None:
+    registry.add_ephemeral(_make_server("scratch"))
+    registry.remove_ephemeral("scratch")
+    with pytest.raises(ServerNotFound):
+        registry.get("scratch")
+    assert registry.list_ephemeral() == []
+
+
+def test_remove_ephemeral_missing_raises(registry: Registry) -> None:
+    with pytest.raises(ServerNotFound):
+        registry.remove_ephemeral("nope")
+
+
+def test_ephemeral_survives_reload(registry: Registry, config_file: Path) -> None:
+    registry.add_ephemeral(_make_server("scratch"))
+    # Simulate the watch() reload path.
+    from mcp_ssh.config import load_config
+    registry._config = load_config(config_file)  # type: ignore[attr-defined]
+    assert registry.get("scratch").name == "scratch"

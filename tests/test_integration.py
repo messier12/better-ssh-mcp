@@ -311,13 +311,14 @@ def test_integration_list_processes_empty_for_unknown_server() -> None:
 
 
 # ---------------------------------------------------------------------------
-# server.py: _register_tools registers exactly 15 tools
+# server.py: _register_tools registers exactly 24 tools
 # ---------------------------------------------------------------------------
 
-def test_server_registers_18_tools(tmp_path: Path) -> None:
-    """_register_tools creates exactly 22 tool registrations on the MCP app.
+def test_server_registers_24_tools(tmp_path: Path) -> None:
+    """_register_tools creates exactly 24 tool registrations on the MCP app.
 
-    Tool count: 5 registry + 7 exec + 6 PTY + 4 SCP (get/put/transfer/sync) = 22.
+    Tool count: 7 registry (incl. setup_jump/teardown_jump) + 7 exec + 6 PTY
+    + 4 SCP (get/put/transfer/sync) = 24.
     """
     from mcp_ssh.server import _register_tools, AppContext
 
@@ -334,8 +335,8 @@ def test_server_registers_18_tools(tmp_path: Path) -> None:
     )
     _register_tools(mcp, ctx)
 
-    # mcp.tool() should have been called 22 times (5 registry + 7 exec + 6 PTY + 4 SCP)
-    assert mcp.tool.call_count == 22
+    # mcp.tool() should have been called 24 times (7 registry + 7 exec + 6 PTY + 4 SCP)
+    assert mcp.tool.call_count == 24
 
 
 # ---------------------------------------------------------------------------
