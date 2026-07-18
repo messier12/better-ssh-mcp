@@ -246,6 +246,45 @@ jump_host = "internal-bastion"  # 3-hop chain: external → internal → app
 
 **Note:** Circular jump-host chains are detected and rejected at config load time.
 
+### Spontaneous Jump Chains (`setup_jump`)
+
+The static `jump_host` config above is ideal for permanent topology. When you
+need a jump route *on the fly* — without editing `servers.toml` or respecifying
+keys — use the `setup_jump` tool. It builds a chain out of **already-registered**
+servers, reusing each one's credentials:
+
+```
+setup_jump(name="winali", chain=["alibaba_das", "windows"])
+```
+
+- `chain[0]` is the first hop (directly reachable); `chain[-1]` is the final
+  target, exposed under `name`.
+- Credentials (user, key, port, host-key policy) are cloned from each named
+  server — you never touch key paths.
+- The result works with **every** SSH tool: `ssh_exec(server="winali", …)`,
+  `ssh_start_pty(server="winali")`, `ssh_get(server="winali", …)`, etc.
+
+**Address overrides.** A host can be reachable at different addresses depending
+on where you dial from (e.g. a WireGuard IP only routable from the prior hop).
+Append `@host` or `@host:port` to override just the dial address for that hop
+while still reusing its credentials:
+
+```
+setup_jump(name="winali", chain=["alibaba_das", "windows@11.11.0.4"])
+```
+
+**Lifetime.** Ephemeral by default — the chain lives in memory and disappears on
+restart, keeping `servers.toml` clean. Pass `persist=True` to write real config
+entries instead. Remove a chain (alias + all its intermediate hops) with:
+
+```
+teardown_jump(name="winali")
+```
+
+Internally each hop becomes a server config (`_<name>_hop<i>` for intermediate
+hops) wired together with `jump_host`, so a chain of any depth reuses the same
+tunnel mechanism described above.
+
 ---
 
 ## Global vs Server-Level Defaults
