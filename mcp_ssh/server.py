@@ -38,14 +38,18 @@ def _build_app() -> tuple[Any, AppContext]:
     state.load()
 
     audit = AuditLog(app_config.settings)
-    pool = ConnectionPool(app_config.servers, app_config.settings)
+    # Pass the live registry (not a startup snapshot) so servers registered at
+    # runtime — including ephemeral jump chains — are visible immediately.
+    pool = ConnectionPool(registry, app_config.settings)
 
     session_manager = SessionManager(
         pool=pool,
         state=state,
         audit=audit,
         settings=app_config.settings,
-        servers=app_config.servers,
+        # Registry.watch is an async generator; the frozen IRegistry Protocol
+        # declares it as `async def`, so mypy sees a spurious signature conflict.
+        registry=registry,  # type: ignore[arg-type]
     )
 
     ctx = AppContext(

@@ -30,6 +30,9 @@ class Registry:
     def __init__(self, config_path: Path) -> None:
         self._config_path = config_path
         self._config: AppConfig = load_config(config_path)
+        # In-memory, non-persisted server configs (e.g. spontaneous jump chains).
+        # These live only for the process lifetime and survive config reloads.
+        self._ephemeral: dict[str, ServerConfig] = {}
 
     # ------------------------------------------------------------------
     # IRegistry interface
@@ -38,17 +41,21 @@ class Registry:
     def get(self, name: str) -> ServerConfig:
         """Return the ``ServerConfig`` for *name*.
 
+        Ephemeral (in-memory) servers take precedence over file-backed ones.
+
         Raises:
             ServerNotFound: if no server with that name is registered.
         """
+        if name in self._ephemeral:
+            return self._ephemeral[name]
         try:
             return self._config.servers[name]
         except KeyError:
             raise ServerNotFound(f"Server '{name}' not found in registry") from None
 
     def list_all(self) -> list[ServerConfig]:
-        """Return all registered server configurations."""
-        return list(self._config.servers.values())
+        """Return all registered server configurations (file-backed + ephemeral)."""
+        return list(self._config.servers.values()) + list(self._ephemeral.values())
 
     def add(self, config: ServerConfig) -> None:
         """Add *config* to the registry and atomically persist the config file.
@@ -56,7 +63,7 @@ class Registry:
         Raises:
             ServerAlreadyExists: if a server with the same name already exists.
         """
-        if config.name in self._config.servers:
+        if config.name in self._config.servers or config.name in self._ephemeral:
             raise ServerAlreadyExists(
                 f"Server '{config.name}' already exists in registry"
             )
@@ -81,6 +88,41 @@ class Registry:
     def get_config(self) -> AppConfig:
         """Return the full ``AppConfig`` (settings + all servers)."""
         return self._config
+
+    # ------------------------------------------------------------------
+    # Ephemeral (in-memory, non-persisted) servers
+    # ------------------------------------------------------------------
+
+    def add_ephemeral(self, config: ServerConfig) -> None:
+        """Register *config* in memory only — never written to the config file.
+
+        Used for spontaneous, throwaway servers such as jump chains. Ephemeral
+        entries survive config-file reloads and are resolved by ``get`` with
+        precedence over file-backed servers.
+
+        Raises:
+            ServerAlreadyExists: if the name collides with any file-backed or
+                ephemeral server.
+        """
+        if config.name in self._config.servers or config.name in self._ephemeral:
+            raise ServerAlreadyExists(
+                f"Server '{config.name}' already exists in registry"
+            )
+        self._ephemeral[config.name] = config
+
+    def remove_ephemeral(self, name: str) -> None:
+        """Remove the ephemeral server named *name*.
+
+        Raises:
+            ServerNotFound: if no ephemeral server with that name exists.
+        """
+        if name not in self._ephemeral:
+            raise ServerNotFound(f"Ephemeral server '{name}' not found in registry")
+        del self._ephemeral[name]
+
+    def list_ephemeral(self) -> list[ServerConfig]:
+        """Return all ephemeral (in-memory) server configurations."""
+        return list(self._ephemeral.values())
 
     async def watch(self) -> AsyncIterator[None]:
         """Yield ``None`` every time the config file changes and reloads successfully.
