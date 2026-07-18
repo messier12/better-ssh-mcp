@@ -63,3 +63,10 @@ Last updated: 2026-04-11 (T4 completed)
 |---|---|---|
 | T5a — Debian packaging | done | pyproject.toml finalised; INSTALL.md covers all 4 topics; release.yml OIDC workflow; mcp-ssh --version works; uv build produces dist/ |
 | T5b — NixOS packaging | done | flake.nix extended with homeManagerModules.default, nixosModules.default, libfido2 buildInput, apps.default, and checks. INSTALL-NIX.md written. |
+
+## Post-release features (branch `ssh_crawl`)
+
+| Feature | Status | Notes |
+|---|---|---|
+| ssh_scan_topology | done | Reachability matrix + auto jump-chains. |
+| ssh_discover / teardown_discovery | done | Recursive SSH auto-discovery per `.agentdocs/2026-07-18-ssh-discover-design.md`. New module `mcp_ssh/discovery.py` (result models `DiscoveryResult`/`DiscoveredHost`/`SkippedKey`, BFS engine, two-level dedup by IP + host-key fp, breadcrumb/injected/subnet-sweep candidate harvest, our-keys/harvest-keys credential modes with encrypted-key skip+report, bounds + session id + `truncated` flag, tunnel-from-center via ephemeral `ServerConfig` with `jump_host`, TOFU forced). Tools wired in `registry_tools.py` + `server.py` (now 27 tools). 47 discovery tests, discovery.py 90% cov. models.py/interfaces.py/exceptions.py unchanged. mypy strict + ruff clean. |

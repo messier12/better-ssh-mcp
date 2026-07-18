@@ -5,6 +5,8 @@ import contextlib
 import os
 from typing import Any
 
+from ..discovery import discover as _discover
+from ..discovery import teardown_discovery as _teardown_discovery
 from ..exceptions import (
     McpSshError,
     ServerAlreadyExists,
@@ -490,6 +492,85 @@ async def ssh_scan_topology(
         )
     )
     return topology.model_dump(mode="json", by_alias=True)
+
+
+async def ssh_discover(
+    registry: IRegistry,
+    pool: IConnectionPool,
+    audit: IAuditLog,
+    seeds: list[str] | None = None,
+    keys: list[str] | None = None,
+    harvest_keys: bool = False,
+    injected_candidates: list[str] | None = None,
+    subnet_sweep: bool = False,
+    sweep_cidr: str | None = None,
+    port: int = 22,
+    max_depth: int = 4,
+    max_nodes: int = 128,
+    timeout: float = 120.0,
+    concurrency: int = 16,
+    name_prefix: str = "disc",
+    persist: bool = False,
+) -> dict[str, Any]:
+    """Recursively discover reachable SSH hosts from a seed frontier.
+
+    Follows each host's own breadcrumbs (known_hosts, ARP cache, ssh config,
+    shell history, /etc/hosts) instead of scanning address ranges, tunnelling
+    from the MCP host through each discoverer. Every confirmed host is
+    auto-registered as an ephemeral server (``disc-<fp8>``) reachable through
+    its discoverer, and can be torn down as a unit with ``teardown_discovery``.
+
+    Discovery is inherently TOFU (trust-on-first-use) regardless of the global
+    host-key policy: the first connect is what captures the fingerprint used to
+    dedup hosts. This accepts the MITM risk for the own-fleet use case.
+
+    v1 notes: ``keys`` is effectively required — pass at least one key path (no
+    config/agent fallback yet); with an empty key set nothing authenticates. A
+    host is only pool-reachable after the scan when exactly one shared key was
+    supplied (its path is threaded onto the ephemeral); harvest-key-only hosts
+    are registered report-only (``pool_reachable=false``).
+
+    Returns a structured ``DiscoveryResult`` (session id, discovered hosts,
+    discoverer→discovered graph, skipped encrypted keys, truncated flag, stats).
+    """
+    try:
+        result = await _discover(
+            registry,
+            pool,
+            audit,
+            seeds=seeds,
+            keys=keys,
+            harvest_keys=harvest_keys,
+            injected_candidates=injected_candidates,
+            subnet_sweep=subnet_sweep,
+            sweep_cidr=sweep_cidr,
+            port=port,
+            max_depth=max_depth,
+            max_nodes=max_nodes,
+            timeout=timeout,
+            concurrency=concurrency,
+            name_prefix=name_prefix,
+            persist=persist,
+        )
+    except McpSshError as exc:
+        return {"error": "discover_error", "message": str(exc)}
+    except Exception as exc:  # noqa: BLE001
+        return {"error": "unexpected_error", "message": str(exc)}
+
+    return result.model_dump(mode="json")
+
+
+def teardown_discovery(
+    session: str,
+    registry: IRegistry,
+    audit: IAuditLog,
+) -> dict[str, Any]:
+    """Remove every ephemeral host registered by an ``ssh_discover`` session.
+
+    The ``teardown_jump`` analog for discovery. Finds all entries carrying the
+    session id in their note and removes them (ephemeral or persisted).
+    """
+    return _teardown_discovery(session, registry=registry, audit=audit)
 
 
 def teardown_jump(

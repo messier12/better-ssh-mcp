@@ -269,6 +269,48 @@ def _register_tools(mcp: Any, ctx: AppContext) -> None:
             force=force,
         )
 
+    @mcp.tool()
+    async def ssh_discover(  # type: ignore[return]
+        seeds: list[str] | None = None,
+        keys: list[str] | None = None,
+        harvest_keys: bool = False,
+        injected_candidates: list[str] | None = None,
+        subnet_sweep: bool = False,
+        sweep_cidr: str | None = None,
+        port: int = 22,
+        max_depth: int = 4,
+        max_nodes: int = 128,
+        timeout: float = 120.0,
+        concurrency: int = 16,
+        name_prefix: str = "disc",
+        persist: bool = False,
+    ) -> dict[str, Any]:
+        """Recursively discover reachable SSH hosts by following breadcrumbs.
+
+        From a seed frontier (default: local + connected servers), harvests each
+        host's known_hosts / ARP / ssh config / history for candidate neighbours,
+        tunnels from the center to probe+connect them with the given keys, and
+        auto-registers every confirmed host as an ephemeral server reachable
+        through its discoverer. Inherently TOFU. Set harvest_keys=True to fold in
+        unencrypted keys read off each host; encrypted keys are reported, not
+        used. Tear the whole run down with teardown_discovery(session).
+        """
+        from .tools.registry_tools import ssh_discover as _fn
+        return await _fn(
+            registry=ctx.registry, pool=ctx.pool, audit=ctx.audit,
+            seeds=seeds, keys=keys, harvest_keys=harvest_keys,
+            injected_candidates=injected_candidates, subnet_sweep=subnet_sweep,
+            sweep_cidr=sweep_cidr, port=port, max_depth=max_depth,
+            max_nodes=max_nodes, timeout=timeout, concurrency=concurrency,
+            name_prefix=name_prefix, persist=persist,
+        )
+
+    @mcp.tool()
+    def teardown_discovery(session: str) -> dict[str, Any]:  # type: ignore[return]
+        """Remove every ephemeral host registered by an ssh_discover session."""
+        from .tools.registry_tools import teardown_discovery as _fn
+        return _fn(session=session, registry=ctx.registry, audit=ctx.audit)
+
     # --- Exec tools (T3b) ---
 
     @mcp.tool()
