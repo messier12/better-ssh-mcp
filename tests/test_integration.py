@@ -7,9 +7,9 @@ from __future__ import annotations
 import asyncio
 import os
 import socket
-import tempfile
+from datetime import UTC
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import asyncssh
 import pytest
@@ -17,7 +17,6 @@ import pytest_asyncio
 
 from mcp_ssh.audit import AuditLog
 from mcp_ssh.models import (
-    AppConfig,
     AuthType,
     GlobalSettings,
     HostKeyPolicy,
@@ -39,7 +38,6 @@ from mcp_ssh.tools.registry_tools import (
     ssh_list_servers,
     ssh_register_server,
 )
-
 
 # ---------------------------------------------------------------------------
 # Local asyncssh test server fixture
@@ -311,16 +309,17 @@ def test_integration_list_processes_empty_for_unknown_server() -> None:
 
 
 # ---------------------------------------------------------------------------
-# server.py: _register_tools registers exactly 24 tools
+# server.py: _register_tools registers exactly 25 tools
 # ---------------------------------------------------------------------------
 
 def test_server_registers_24_tools(tmp_path: Path) -> None:
-    """_register_tools creates exactly 24 tool registrations on the MCP app.
+    """_register_tools creates exactly 27 tool registrations on the MCP app.
 
-    Tool count: 7 registry (incl. setup_jump/teardown_jump) + 7 exec + 6 PTY
-    + 4 SCP (get/put/transfer/sync) = 24.
+    Tool count: 10 registry (incl. setup_jump/teardown_jump/ssh_scan_topology
+    and ssh_discover/teardown_discovery) + 7 exec + 6 PTY + 4 SCP
+    (get/put/transfer/sync) = 27.
     """
-    from mcp_ssh.server import _register_tools, AppContext
+    from mcp_ssh.server import AppContext, _register_tools
 
     mcp = MagicMock()
     tool_decorator = MagicMock(side_effect=lambda f: f)
@@ -335,8 +334,8 @@ def test_server_registers_24_tools(tmp_path: Path) -> None:
     )
     _register_tools(mcp, ctx)
 
-    # mcp.tool() should have been called 24 times (7 registry + 7 exec + 6 PTY + 4 SCP)
-    assert mcp.tool.call_count == 24
+    # mcp.tool() should have been called 27 times (10 registry + 7 exec + 6 PTY + 4 SCP)
+    assert mcp.tool.call_count == 27
 
 
 # ---------------------------------------------------------------------------
@@ -352,7 +351,8 @@ def test_state_file_created_with_0o600_permissions(tmp_path: Path) -> None:
     store = StateStore(settings)
     store.load()
     # Trigger a write by saving any process entry
-    from datetime import datetime, timezone
+    from datetime import datetime
+
     from mcp_ssh.models import ProcessRecord, ProcessStatus
     store.upsert_process(
         ProcessRecord(
@@ -362,7 +362,7 @@ def test_state_file_created_with_0o600_permissions(tmp_path: Path) -> None:
             remote_pid=999,
             log_file="/tmp/p1.log",
             exit_file="/tmp/p1.exit",
-            started_at=datetime.now(tz=timezone.utc),
+            started_at=datetime.now(tz=UTC),
             status=ProcessStatus.running,
         )
     )

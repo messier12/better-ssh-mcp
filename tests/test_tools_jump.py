@@ -40,8 +40,8 @@ def audit() -> MagicMock:
     return MagicMock()
 
 
-def test_setup_jump_builds_ephemeral_chain(registry: Registry, audit: MagicMock) -> None:
-    res = setup_jump(
+async def test_setup_jump_builds_ephemeral_chain(registry: Registry, audit: MagicMock) -> None:
+    res = await setup_jump(
         "winali", ["alibaba", "windows@11.11.0.4"], registry=registry, audit=audit
     )
     assert res["jump"] == "winali"
@@ -60,33 +60,33 @@ def test_setup_jump_builds_ephemeral_chain(registry: Registry, audit: MagicMock)
     assert hop0.jump_host is None             # first hop is direct
 
 
-def test_setup_jump_reuses_registered_address_when_no_override(
+async def test_setup_jump_reuses_registered_address_when_no_override(
     registry: Registry, audit: MagicMock
 ) -> None:
-    setup_jump("wj", ["alibaba", "windows"], registry=registry, audit=audit)
+    await setup_jump("wj", ["alibaba", "windows"], registry=registry, audit=audit)
     alias = registry.get("wj")
     assert alias.host == "10.150.1.71"  # windows' own registered host
     assert alias.port == 2222           # windows' own port preserved
 
 
-def test_setup_jump_host_port_override(registry: Registry, audit: MagicMock) -> None:
-    setup_jump("wj", ["alibaba", "windows@11.11.0.4:2200"], registry=registry, audit=audit)
+async def test_setup_jump_host_port_override(registry: Registry, audit: MagicMock) -> None:
+    await setup_jump("wj", ["alibaba", "windows@11.11.0.4:2200"], registry=registry, audit=audit)
     alias = registry.get("wj")
     assert alias.host == "11.11.0.4"
     assert alias.port == 2200
 
 
-def test_setup_jump_is_not_persisted_by_default(
+async def test_setup_jump_is_not_persisted_by_default(
     registry: Registry, audit: MagicMock, tmp_path: Path
 ) -> None:
-    setup_jump("wj", ["alibaba", "windows"], registry=registry, audit=audit)
+    await setup_jump("wj", ["alibaba", "windows"], registry=registry, audit=audit)
     assert "wj" not in (tmp_path / "servers.toml").read_text(encoding="utf-8")
 
 
-def test_setup_jump_persist_writes_file(
+async def test_setup_jump_persist_writes_file(
     registry: Registry, audit: MagicMock, tmp_path: Path
 ) -> None:
-    setup_jump(
+    await setup_jump(
         "wj", ["alibaba", "windows"], registry=registry, audit=audit, persist=True
     )
     content = (tmp_path / "servers.toml").read_text(encoding="utf-8")
@@ -94,8 +94,8 @@ def test_setup_jump_persist_writes_file(
     assert "_wj_hop0" in content
 
 
-def test_setup_jump_three_hops(registry: Registry, audit: MagicMock) -> None:
-    setup_jump(
+async def test_setup_jump_three_hops(registry: Registry, audit: MagicMock) -> None:
+    await setup_jump(
         "deep",
         ["alibaba", "windows@10.0.0.2", "windows@10.0.0.3"],
         registry=registry,
@@ -107,15 +107,15 @@ def test_setup_jump_three_hops(registry: Registry, audit: MagicMock) -> None:
     assert registry.get("deep").host == "10.0.0.3"
 
 
-def test_setup_jump_custom_note_on_final(registry: Registry, audit: MagicMock) -> None:
-    setup_jump(
+async def test_setup_jump_custom_note_on_final(registry: Registry, audit: MagicMock) -> None:
+    await setup_jump(
         "wj", ["alibaba", "windows"], registry=registry, audit=audit, note="prod box"
     )
     assert registry.get("wj").note == "prod box"
 
 
-def test_setup_jump_rejects_unknown_hop(registry: Registry, audit: MagicMock) -> None:
-    res = setup_jump("wj", ["alibaba", "ghost"], registry=registry, audit=audit)
+async def test_setup_jump_rejects_unknown_hop(registry: Registry, audit: MagicMock) -> None:
+    res = await setup_jump("wj", ["alibaba", "ghost"], registry=registry, audit=audit)
     assert res["error"] == "server_not_found"
     # Nothing should have been left behind from the partial build.
     from mcp_ssh.exceptions import ServerNotFound
@@ -123,20 +123,20 @@ def test_setup_jump_rejects_unknown_hop(registry: Registry, audit: MagicMock) ->
         registry.get("_wj_hop0")
 
 
-def test_setup_jump_rejects_existing_name(registry: Registry, audit: MagicMock) -> None:
-    res = setup_jump("alibaba", ["alibaba"], registry=registry, audit=audit)
+async def test_setup_jump_rejects_existing_name(registry: Registry, audit: MagicMock) -> None:
+    res = await setup_jump("alibaba", ["alibaba"], registry=registry, audit=audit)
     assert res["error"] == "server_already_exists"
 
 
-def test_setup_jump_rejects_empty_chain(registry: Registry, audit: MagicMock) -> None:
-    res = setup_jump("wj", [], registry=registry, audit=audit)
+async def test_setup_jump_rejects_empty_chain(registry: Registry, audit: MagicMock) -> None:
+    res = await setup_jump("wj", [], registry=registry, audit=audit)
     assert res["error"] == "invalid_chain"
 
 
-def test_teardown_jump_removes_alias_and_hops(
+async def test_teardown_jump_removes_alias_and_hops(
     registry: Registry, audit: MagicMock
 ) -> None:
-    setup_jump("winali", ["alibaba", "windows@11.11.0.4"], registry=registry, audit=audit)
+    await setup_jump("winali", ["alibaba", "windows@11.11.0.4"], registry=registry, audit=audit)
     res = teardown_jump("winali", registry=registry, audit=audit)
     assert set(res["removed"]) == {"winali", "_winali_hop0"}
     from mcp_ssh.exceptions import ServerNotFound
@@ -146,10 +146,10 @@ def test_teardown_jump_removes_alias_and_hops(
         registry.get("_winali_hop0")
 
 
-def test_teardown_jump_persisted(
+async def test_teardown_jump_persisted(
     registry: Registry, audit: MagicMock, tmp_path: Path
 ) -> None:
-    setup_jump(
+    await setup_jump(
         "wj", ["alibaba", "windows"], registry=registry, audit=audit, persist=True
     )
     teardown_jump("wj", registry=registry, audit=audit)

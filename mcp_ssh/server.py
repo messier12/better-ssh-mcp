@@ -194,25 +194,37 @@ def _register_tools(mcp: Any, ctx: AppContext) -> None:
         return _fn(name=name, registry=ctx.registry, pool=ctx.pool, audit=ctx.audit)
 
     @mcp.tool()
-    def setup_jump(  # type: ignore[return]
+    async def setup_jump(  # type: ignore[return]
         name: str,
-        chain: list[str],
+        chain: list[str] | None = None,
         persist: bool = False,
         note: str | None = None,
+        target: str | None = None,
+        max_age: float | None = None,
+        force_rescan: bool = False,
     ) -> dict[str, Any]:
         """Create a jump-chain server that tunnels through existing servers.
 
-        Each item in *chain* is a registered server name whose credentials are
-        reused; chain[0] is the first hop, chain[-1] the final target (exposed
-        as *name*). Append '@host' or '@host:port' to override a hop's dial
-        address (e.g. ["alibaba_das", "windows@11.11.0.4"]). Ephemeral by
-        default; pass persist=True to write it to servers.toml. Use *name* with
-        any SSH tool afterward; remove with teardown_jump.
+        Manual mode: each item in *chain* is a registered server name whose
+        credentials are reused; chain[0] is the first hop, chain[-1] the final
+        target (exposed as *name*). Append '@host' or '@host:port' to override a
+        hop's dial address (e.g. ["alibaba_das", "windows@11.11.0.4"]).
+
+        Auto mode: pass *target* (a registered server name) instead of *chain* to
+        pathfind a chain over the cached reachability matrix (see
+        ssh_scan_topology). *max_age* (seconds) rejects a stale cache;
+        *force_rescan=True* runs a fresh scan first. The alias is verified with a
+        real connect and torn down on failure.
+
+        Ephemeral by default; pass persist=True to write it to servers.toml. Use
+        *name* with any SSH tool afterward; remove with teardown_jump.
         """
         from .tools.registry_tools import setup_jump as _fn
-        return _fn(
+        return await _fn(
             name=name, chain=chain, registry=ctx.registry, audit=ctx.audit,
-            persist=persist, note=note,
+            persist=persist, note=note, target=target,
+            pool=ctx.pool, state=ctx.state,
+            max_age=max_age, force_rescan=force_rescan,
         )
 
     @mcp.tool()
@@ -233,6 +245,71 @@ def _register_tools(mcp: Any, ctx: AppContext) -> None:
         """Show the stored known host key for a registered server."""
         from .tools.registry_tools import ssh_show_known_host as _fn
         return _fn(name=name, registry=ctx.registry)
+
+    @mcp.tool()
+    async def ssh_scan_topology(  # type: ignore[return]
+        include: list[str] | None = None,
+        exclude: list[str] | None = None,
+        probe_timeout: float = 5.0,
+        harvest_timeout: float = 15.0,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        """Probe server-to-server reachability and cache the N×N matrix.
+
+        Opens a direct-tcpip channel from each source's own vantage to every
+        target's candidate addresses (registered host + harvested interface IPs).
+        Feeds setup_jump(target=...). Use include/exclude to bound which servers
+        are scanned.
+        """
+        from .tools.registry_tools import ssh_scan_topology as _fn
+        return await _fn(
+            registry=ctx.registry, pool=ctx.pool, state=ctx.state, audit=ctx.audit,
+            include=include, exclude=exclude,
+            probe_timeout=probe_timeout, harvest_timeout=harvest_timeout,
+            force=force,
+        )
+
+    @mcp.tool()
+    async def ssh_discover(  # type: ignore[return]
+        seeds: list[str] | None = None,
+        keys: list[str] | None = None,
+        harvest_keys: bool = False,
+        injected_candidates: list[str] | None = None,
+        subnet_sweep: bool = False,
+        sweep_cidr: str | None = None,
+        port: int = 22,
+        max_depth: int = 4,
+        max_nodes: int = 128,
+        timeout: float = 120.0,
+        concurrency: int = 16,
+        name_prefix: str = "disc",
+        persist: bool = False,
+    ) -> dict[str, Any]:
+        """Recursively discover reachable SSH hosts by following breadcrumbs.
+
+        From a seed frontier (default: local + connected servers), harvests each
+        host's known_hosts / ARP / ssh config / history for candidate neighbours,
+        tunnels from the center to probe+connect them with the given keys, and
+        auto-registers every confirmed host as an ephemeral server reachable
+        through its discoverer. Inherently TOFU. Set harvest_keys=True to fold in
+        unencrypted keys read off each host; encrypted keys are reported, not
+        used. Tear the whole run down with teardown_discovery(session).
+        """
+        from .tools.registry_tools import ssh_discover as _fn
+        return await _fn(
+            registry=ctx.registry, pool=ctx.pool, audit=ctx.audit,
+            seeds=seeds, keys=keys, harvest_keys=harvest_keys,
+            injected_candidates=injected_candidates, subnet_sweep=subnet_sweep,
+            sweep_cidr=sweep_cidr, port=port, max_depth=max_depth,
+            max_nodes=max_nodes, timeout=timeout, concurrency=concurrency,
+            name_prefix=name_prefix, persist=persist,
+        )
+
+    @mcp.tool()
+    def teardown_discovery(session: str) -> dict[str, Any]:  # type: ignore[return]
+        """Remove every ephemeral host registered by an ssh_discover session."""
+        from .tools.registry_tools import teardown_discovery as _fn
+        return _fn(session=session, registry=ctx.registry, audit=ctx.audit)
 
     # --- Exec tools (T3b) ---
 
