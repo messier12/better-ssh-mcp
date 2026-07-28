@@ -1,6 +1,6 @@
 """MCP server entrypoint for mcp-ssh (T4).
 
-Wires together all components and registers all 18 MCP tools.
+Wires together all components and registers 9 consolidated MCP tools.
 """
 from __future__ import annotations
 
@@ -104,97 +104,302 @@ class AppContext:
 
 
 def _register_tools(mcp: Any, ctx: AppContext) -> None:
-    """Register all 17 SSH MCP tools on the FastMCP app."""
+    """Register the 9 consolidated SSH MCP tools on the FastMCP app."""
     from .tools.exec_tools import (
-        ssh_check_process as ssh_check_process_fn,
+        ssh_check_process as _check_process,
     )
     from .tools.exec_tools import (
-        ssh_exec as ssh_exec_fn,
+        ssh_exec as _exec,
     )
     from .tools.exec_tools import (
-        ssh_exec_stream as ssh_exec_stream_fn,
+        ssh_exec_stream as _exec_stream,
     )
     from .tools.exec_tools import (
-        ssh_kill_process as ssh_kill_process_fn,
+        ssh_kill_process as _kill_process,
     )
     from .tools.exec_tools import (
-        ssh_list_processes as ssh_list_processes_fn,
+        ssh_list_processes as _list_processes,
     )
     from .tools.exec_tools import (
-        ssh_read_process as ssh_read_process_fn,
+        ssh_read_process as _read_process,
     )
     from .tools.exec_tools import (
-        ssh_write_process as ssh_write_process_fn,
+        ssh_write_process as _write_process,
     )
     from .tools.pty_tools import (
-        ssh_pty_attach as ssh_pty_attach_fn,
+        ssh_pty_attach as _pty_attach,
     )
     from .tools.pty_tools import (
-        ssh_pty_close as ssh_pty_close_fn,
+        ssh_pty_close as _pty_close,
     )
     from .tools.pty_tools import (
-        ssh_pty_read as ssh_pty_read_fn,
+        ssh_pty_read as _pty_read,
     )
     from .tools.pty_tools import (
-        ssh_pty_resize as ssh_pty_resize_fn,
+        ssh_pty_resize as _pty_resize,
     )
     from .tools.pty_tools import (
-        ssh_pty_write as ssh_pty_write_fn,
+        ssh_pty_write as _pty_write,
     )
     from .tools.pty_tools import (
-        ssh_start_pty as ssh_start_pty_fn,
+        ssh_start_pty as _start_pty,
     )
-    from .tools.registry_tools import async_ssh_add_known_host
-    from .tools.scp_tools import ssh_get as ssh_get_fn
-    from .tools.scp_tools import ssh_put as ssh_put_fn
-    from .tools.scp_tools import ssh_sync as ssh_sync_fn
-    from .tools.scp_tools import ssh_transfer as ssh_transfer_fn
+    from .tools.registry_tools import (
+        async_ssh_add_known_host as _add_known_host,
+    )
+    from .tools.registry_tools import (
+        setup_jump as _setup_jump,
+    )
+    from .tools.registry_tools import (
+        ssh_deregister_server as _deregister,
+    )
+    from .tools.registry_tools import (
+        ssh_discover as _discover,
+    )
+    from .tools.registry_tools import (
+        ssh_list_servers as _list_servers,
+    )
+    from .tools.registry_tools import (
+        ssh_register_server as _register,
+    )
+    from .tools.registry_tools import (
+        ssh_scan_topology as _scan_topology,
+    )
+    from .tools.registry_tools import (
+        ssh_show_known_host as _show_known_host,
+    )
+    from .tools.registry_tools import (
+        teardown_discovery as _teardown_discovery,
+    )
+    from .tools.registry_tools import (
+        teardown_jump as _teardown_jump,
+    )
+    from .tools.scp_tools import (
+        ssh_get as _get,
+    )
+    from .tools.scp_tools import (
+        ssh_put as _put,
+    )
+    from .tools.scp_tools import (
+        ssh_sync as _sync,
+    )
+    from .tools.scp_tools import (
+        ssh_transfer as _transfer,
+    )
 
-    # --- Registry tools (T3a) ---
-
-    @mcp.tool(structured_output=False)
-    def ssh_list_servers() -> str:
-        """List all registered SSH servers and their connection statuses."""
-        from .tools.registry_tools import ssh_list_servers as _fn
-        return _fn(registry=ctx.registry, pool=ctx.pool)
+    # ── 1. ssh_exec ──────────────────────────────────────────────────────────
 
     @mcp.tool()
-    def ssh_register_server(  # type: ignore[return]
-        name: str,
-        host: str,
-        user: str,
-        auth_type: str,
-        port: int = 22,
-        key_path: str | None = None,
-        cert_path: str | None = None,
-        password_env: str | None = None,
-        jump_host: str | None = None,
-        host_key_policy: str | None = None,
-        default_cwd: str | None = None,
-        max_sessions: int | None = None,
-        keepalive_interval: int | None = None,
-        note: str | None = None,
+    async def ssh_exec(  # type: ignore[return]
+        server: str,
+        command: str,
+        cwd: str | None = None,
+        timeout: float | None = 30.0,
     ) -> dict[str, Any]:
-        """Register a new SSH server configuration."""
-        from .tools.registry_tools import ssh_register_server as _fn
-        return _fn(
-            name=name, host=host, user=user, auth_type=auth_type,
-            registry=ctx.registry, audit=ctx.audit,
-            port=port, key_path=key_path, cert_path=cert_path,
-            password_env=password_env, jump_host=jump_host,
-            host_key_policy=host_key_policy, default_cwd=default_cwd,
-            max_sessions=max_sessions, keepalive_interval=keepalive_interval,
-            note=note,
+        """Run a command on a remote server and wait for completion.
+
+        Returns ``{output, exit_code, server}``.
+        Pass ``timeout=None`` to wait indefinitely (logs a warning).
+        """
+        return await _exec(
+            server=server, command=command,
+            registry=ctx.registry, pool=ctx.pool, audit=ctx.audit,
+            cwd=cwd, timeout=timeout,
         )
 
-    @mcp.tool()
-    def ssh_deregister_server(name: str) -> dict[str, Any]:  # type: ignore[return]
-        """Deregister a previously registered SSH server."""
-        from .tools.registry_tools import ssh_deregister_server as _fn
-        return _fn(name=name, registry=ctx.registry, pool=ctx.pool, audit=ctx.audit)
+    # ── 2. ssh_process ───────────────────────────────────────────────────────
 
     @mcp.tool()
-    async def setup_jump(  # type: ignore[return]
+    async def ssh_process(  # type: ignore[return]
+        action: str,
+        server: str | None = None,
+        command: str | None = None,
+        process_id: str | None = None,
+        cwd: str | None = None,
+        data: str | None = None,
+        signal: str = "SIGTERM",
+        max_bytes: int = 65536,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Manage long-running background processes (nohup-backed).
+
+        action="start"  — server, command required; cwd optional.
+                          Returns {process_id, server, command}.
+        action="read"   — process_id required; max_bytes, offset optional.
+                          Returns {output, next_offset, running, exit_code, remote_pid, server}.
+                          Pass offset=next_offset from previous call to stream incrementally.
+        action="write"  — process_id, data required.
+                          Note: nohup processes have no stdin; always returns an error.
+        action="kill"   — process_id required; signal optional (SIGTERM default).
+                          Allowed: SIGTERM SIGKILL SIGINT SIGHUP SIGQUIT SIGUSR1 SIGUSR2.
+        action="list"   — server optional filter. Returns {processes: [...]}.
+        action="check"  — process_id required. Runs kill -0 + reads exit file.
+                          Returns {output, running, exit_code, remote_pid, server}.
+        """
+        if action == "start":
+            return await _exec_stream(
+                server=server or "", command=command or "",
+                session_manager=ctx.session_manager, audit=ctx.audit,
+                cwd=cwd,
+            )
+        if action == "read":
+            return await _read_process(
+                process_id=process_id or "",
+                session_manager=ctx.session_manager,
+                max_bytes=max_bytes, offset=offset,
+            )
+        if action == "write":
+            return await _write_process(
+                process_id=process_id or "", data=data or "",
+                session_manager=ctx.session_manager,
+            )
+        if action == "kill":
+            return await _kill_process(
+                process_id=process_id or "",
+                session_manager=ctx.session_manager, signal=signal,
+            )
+        if action == "list":
+            return _list_processes(session_manager=ctx.session_manager, server=server)
+        if action == "check":
+            return await _check_process(
+                process_id=process_id or "",
+                session_manager=ctx.session_manager,
+            )
+        return {"error": "invalid_action", "action": action,
+                "message": f"Unknown action {action!r}. Use: start read write kill list check"}
+
+    # ── 3. ssh_pty ───────────────────────────────────────────────────────────
+
+    @mcp.tool()
+    async def ssh_pty(  # type: ignore[return]
+        action: str,
+        session_id: str | None = None,
+        server: str | None = None,
+        command: str | None = None,
+        cols: int = 220,
+        rows: int = 50,
+        use_tmux: bool = False,
+        data: str | None = None,
+        max_bytes: int = 65536,
+    ) -> dict[str, Any]:
+        """PTY session lifecycle.
+
+        action="start"  — server required; command, cols, rows, use_tmux optional.
+                          With use_tmux=True the session survives MCP reconnects.
+                          Returns {session_id, use_tmux, server, command}.
+        action="read"   — session_id required; max_bytes optional.
+                          Returns {output, alive}.
+        action="write"  — session_id, data required.
+                          Use \\r (not \\n) to submit a command line.
+        action="resize" — session_id, cols, rows required.
+        action="close"  — session_id required. Cleans up local channel
+                          (tmux window left alive on remote).
+        action="attach" — session_id required. Tmux-backed sessions only.
+        """
+        if action == "start":
+            return await _start_pty(
+                server=server or "",
+                session_manager=ctx.session_manager, audit=ctx.audit,
+                command=command, cols=cols, rows=rows, use_tmux=use_tmux,
+            )
+        if action == "read":
+            return await _pty_read(
+                session_id=session_id or "",
+                session_manager=ctx.session_manager, max_bytes=max_bytes,
+            )
+        if action == "write":
+            return await _pty_write(
+                session_id=session_id or "", data=data or "",
+                session_manager=ctx.session_manager,
+            )
+        if action == "resize":
+            return await _pty_resize(
+                session_id=session_id or "", cols=cols, rows=rows,
+                session_manager=ctx.session_manager,
+            )
+        if action == "close":
+            return await _pty_close(
+                session_id=session_id or "",
+                session_manager=ctx.session_manager, audit=ctx.audit,
+            )
+        if action == "attach":
+            return await _pty_attach(
+                session_id=session_id or "",
+                session_manager=ctx.session_manager,
+            )
+        return {"error": "invalid_action", "action": action,
+                "message": f"Unknown action {action!r}. Use: start read write resize close attach"}
+
+    # ── 4. ssh_files ─────────────────────────────────────────────────────────
+
+    @mcp.tool()
+    async def ssh_files(  # type: ignore[return]
+        action: str,
+        server: str | None = None,
+        remote_path: str | None = None,
+        local_path: str | None = None,
+        src_server: str | None = None,
+        src_path: str | None = None,
+        dst_server: str | None = None,
+        dst_path: str | None = None,
+        recurse: bool = False,
+        preserve: bool = False,
+        delete: bool = False,
+    ) -> dict[str, Any]:
+        """File transfer between local and remote servers.
+
+        action="get"      — server, remote_path, local_path required.
+                            Download from remote to local.
+        action="put"      — server, local_path, remote_path required.
+                            Upload from local to remote.
+        action="transfer" — src_server, src_path, dst_server, dst_path required.
+                            Copy between two remotes via memory (no local disk).
+                            Same-server copies run cp remotely.
+        action="sync"     — src_server, src_path, dst_server, dst_path required.
+                            Copy only changed files; src_path may be a glob.
+                            Same-server uses rsync if available, else cp -u.
+                            Cross-server compares size+mtime via SFTP.
+                            Set delete=True to remove dest files absent from src.
+                            Returns {copied, skipped, deleted, method}.
+
+        recurse and preserve apply to all actions.
+        """
+        if action == "get":
+            return await _get(
+                server=server or "", remote_path=remote_path or "",
+                local_path=local_path or "",
+                recurse=recurse, preserve=preserve,
+                registry=ctx.registry, pool=ctx.pool, audit=ctx.audit,
+            )
+        if action == "put":
+            return await _put(
+                server=server or "", local_path=local_path or "",
+                remote_path=remote_path or "",
+                recurse=recurse, preserve=preserve,
+                registry=ctx.registry, pool=ctx.pool, audit=ctx.audit,
+            )
+        if action == "transfer":
+            return await _transfer(
+                src_server=src_server or "", src_path=src_path or "",
+                dst_server=dst_server or "", dst_path=dst_path or "",
+                recurse=recurse, preserve=preserve,
+                registry=ctx.registry, pool=ctx.pool, audit=ctx.audit,
+            )
+        if action == "sync":
+            return await _sync(
+                src_server=src_server or "", src_path=src_path or "",
+                dst_server=dst_server or "", dst_path=dst_path or "",
+                delete=delete, preserve=preserve,
+                registry=ctx.registry, pool=ctx.pool, audit=ctx.audit,
+            )
+        return {"error": "invalid_action", "action": action,
+                "message": f"Unknown action {action!r}. Use: get put transfer sync"}
+
+    # ── 5. ssh_jump ──────────────────────────────────────────────────────────
+
+    @mcp.tool()
+    async def ssh_jump(  # type: ignore[return]
+        action: str,
         name: str,
         chain: list[str] | None = None,
         persist: bool = False,
@@ -203,74 +408,39 @@ def _register_tools(mcp: Any, ctx: AppContext) -> None:
         max_age: float | None = None,
         force_rescan: bool = False,
     ) -> dict[str, Any]:
-        """Create a jump-chain server that tunnels through existing servers.
+        """Create or remove SSH jump-chain tunnels.
 
-        Manual mode: each item in *chain* is a registered server name whose
-        credentials are reused; chain[0] is the first hop, chain[-1] the final
-        target (exposed as *name*). Append '@host' or '@host:port' to override a
-        hop's dial address (e.g. ["alibaba_das", "windows@11.11.0.4"]).
-
-        Auto mode: pass *target* (a registered server name) instead of *chain* to
-        pathfind a chain over the cached reachability matrix (see
-        ssh_scan_topology). *max_age* (seconds) rejects a stale cache;
-        *force_rescan=True* runs a fresh scan first. The alias is verified with a
-        real connect and torn down on failure.
-
-        Ephemeral by default; pass persist=True to write it to servers.toml. Use
-        *name* with any SSH tool afterward; remove with teardown_jump.
+        action="setup"    — name required; then either:
+                              Manual: chain=[server1, server2, ...] — reuses each
+                                server's credentials; chain[0] is first hop,
+                                chain[-1] the final target. Append @host or
+                                @host:port to override a hop's dial address.
+                              Auto: target=<server> — pathfinds over the cached
+                                reachability matrix (see ssh_scan_topology).
+                                max_age rejects a stale cache;
+                                force_rescan=True runs a fresh scan first.
+                            persist=True writes to servers.toml (default: ephemeral).
+                            Use name with any SSH tool afterward.
+        action="teardown" — name required. Removes the alias and all hop entries.
         """
-        from .tools.registry_tools import setup_jump as _fn
-        return await _fn(
-            name=name, chain=chain, registry=ctx.registry, audit=ctx.audit,
-            persist=persist, note=note, target=target,
-            pool=ctx.pool, state=ctx.state,
-            max_age=max_age, force_rescan=force_rescan,
-        )
+        if action == "setup":
+            return await _setup_jump(
+                name=name, chain=chain, registry=ctx.registry, audit=ctx.audit,
+                persist=persist, note=note, target=target,
+                pool=ctx.pool, state=ctx.state,
+                max_age=max_age, force_rescan=force_rescan,
+            )
+        if action == "teardown":
+            return _teardown_jump(name=name, registry=ctx.registry, audit=ctx.audit)
+        return {"error": "invalid_action", "action": action,
+                "message": f"Unknown action {action!r}. Use: setup teardown"}
 
-    @mcp.tool()
-    def teardown_jump(name: str) -> dict[str, Any]:  # type: ignore[return]
-        """Remove a jump chain created by setup_jump (its alias and all hops)."""
-        from .tools.registry_tools import teardown_jump as _fn
-        return _fn(name=name, registry=ctx.registry, audit=ctx.audit)
-
-    @mcp.tool()
-    async def ssh_add_known_host(name: str) -> dict[str, Any]:  # type: ignore[return]
-        """Connect and record the server's host key in known_hosts."""
-        return await async_ssh_add_known_host(
-            name=name, registry=ctx.registry, pool=ctx.pool, audit=ctx.audit
-        )
-
-    @mcp.tool()
-    def ssh_show_known_host(name: str) -> dict[str, Any]:  # type: ignore[return]
-        """Show the stored known host key for a registered server."""
-        from .tools.registry_tools import ssh_show_known_host as _fn
-        return _fn(name=name, registry=ctx.registry)
-
-    @mcp.tool()
-    async def ssh_scan_topology(  # type: ignore[return]
-        include: list[str] | None = None,
-        exclude: list[str] | None = None,
-        probe_timeout: float = 5.0,
-        harvest_timeout: float = 15.0,
-        force: bool = False,
-    ) -> dict[str, Any]:
-        """Probe server-to-server reachability and cache the N×N matrix.
-
-        Opens a direct-tcpip channel from each source's own vantage to every
-        target's candidate addresses (registered host + harvested interface IPs).
-        Feeds setup_jump(target=...). Use include/exclude to bound which servers
-        are scanned.
-        """
-        from .tools.registry_tools import ssh_scan_topology as _fn
-        return await _fn(
-            registry=ctx.registry, pool=ctx.pool, state=ctx.state, audit=ctx.audit,
-            include=include, exclude=exclude,
-            probe_timeout=probe_timeout, harvest_timeout=harvest_timeout,
-            force=force,
-        )
+    # ── 6. ssh_discover ──────────────────────────────────────────────────────
 
     @mcp.tool()
     async def ssh_discover(  # type: ignore[return]
+        action: str,
+        session: str | None = None,
         seeds: list[str] | None = None,
         keys: list[str] | None = None,
         harvest_keys: bool = False,
@@ -285,243 +455,131 @@ def _register_tools(mcp: Any, ctx: AppContext) -> None:
         name_prefix: str = "disc",
         persist: bool = False,
     ) -> dict[str, Any]:
-        """Recursively discover reachable SSH hosts by following breadcrumbs.
+        """Recursively discover and register reachable SSH hosts.
 
-        From a seed frontier (default: local + connected servers), harvests each
-        host's known_hosts / ARP / ssh config / history for candidate neighbours,
-        tunnels from the center to probe+connect them with the given keys, and
-        auto-registers every confirmed host as an ephemeral server reachable
-        through its discoverer. Inherently TOFU. Set harvest_keys=True to fold in
-        unencrypted keys read off each host; encrypted keys are reported, not
-        used. Tear the whole run down with teardown_discovery(session).
+        action="start"    — Crawls from seeds (default: local + connected servers),
+                            harvests known_hosts/ARP/ssh config/history for
+                            candidate neighbours, tunnels to probe+connect them
+                            with the given keys, auto-registers every confirmed
+                            host as an ephemeral server reachable through its
+                            discoverer. Inherently TOFU.
+                            Set harvest_keys=True to fold in unencrypted keys
+                            found on each host (encrypted keys are reported only).
+                            Returns a session ID for cleanup.
+        action="teardown" — session required. Removes every ephemeral host
+                            registered by that discovery session.
         """
-        from .tools.registry_tools import ssh_discover as _fn
-        return await _fn(
-            registry=ctx.registry, pool=ctx.pool, audit=ctx.audit,
-            seeds=seeds, keys=keys, harvest_keys=harvest_keys,
-            injected_candidates=injected_candidates, subnet_sweep=subnet_sweep,
-            sweep_cidr=sweep_cidr, port=port, max_depth=max_depth,
-            max_nodes=max_nodes, timeout=timeout, concurrency=concurrency,
-            name_prefix=name_prefix, persist=persist,
-        )
+        if action == "start":
+            return await _discover(
+                registry=ctx.registry, pool=ctx.pool, audit=ctx.audit,
+                seeds=seeds, keys=keys, harvest_keys=harvest_keys,
+                injected_candidates=injected_candidates,
+                subnet_sweep=subnet_sweep, sweep_cidr=sweep_cidr,
+                port=port, max_depth=max_depth, max_nodes=max_nodes,
+                timeout=timeout, concurrency=concurrency,
+                name_prefix=name_prefix, persist=persist,
+            )
+        if action == "teardown":
+            return _teardown_discovery(
+                session=session or "", registry=ctx.registry, audit=ctx.audit,
+            )
+        return {"error": "invalid_action", "action": action,
+                "message": f"Unknown action {action!r}. Use: start teardown"}
+
+    # ── 7. ssh_known_host ────────────────────────────────────────────────────
 
     @mcp.tool()
-    def teardown_discovery(session: str) -> dict[str, Any]:  # type: ignore[return]
-        """Remove every ephemeral host registered by an ssh_discover session."""
-        from .tools.registry_tools import teardown_discovery as _fn
-        return _fn(session=session, registry=ctx.registry, audit=ctx.audit)
-
-    # --- Exec tools (T3b) ---
-
-    @mcp.tool()
-    async def ssh_exec(  # type: ignore[return]
-        server: str,
-        command: str,
-        cwd: str | None = None,
-        timeout: float | None = 30.0,
+    async def ssh_known_host(  # type: ignore[return]
+        action: str,
+        name: str,
     ) -> dict[str, Any]:
-        """Run a command on a remote server and wait for completion."""
-        return await ssh_exec_fn(
-            server=server, command=command,
-            registry=ctx.registry, pool=ctx.pool, audit=ctx.audit,
-            cwd=cwd, timeout=timeout,
-        )
+        """Manage known host keys for a registered server.
 
-    @mcp.tool()
-    async def ssh_exec_stream(  # type: ignore[return]
-        server: str,
-        command: str,
-        cwd: str | None = None,
-    ) -> dict[str, Any]:
-        """Start a long-running background process (nohup-backed)."""
-        return await ssh_exec_stream_fn(
-            server=server, command=command,
-            session_manager=ctx.session_manager, audit=ctx.audit,
-            cwd=cwd,
-        )
-
-    @mcp.tool()
-    async def ssh_read_process(  # type: ignore[return]
-        process_id: str,
-        max_bytes: int = 65536,
-        offset: int = 0,
-    ) -> dict[str, Any]:
-        """Read buffered output from a background process.
-
-        Pass *offset=0* (default) to read from the beginning.
-        Pass the ``next_offset`` from a previous response to read only new output.
+        action="add"  — Connect and record the server's host key in known_hosts.
+        action="show" — Return the stored host key entry.
         """
-        return await ssh_read_process_fn(
-            process_id=process_id,
-            session_manager=ctx.session_manager,
-            max_bytes=max_bytes,
-            offset=offset,
-        )
+        if action == "add":
+            return await _add_known_host(
+                name=name, registry=ctx.registry, pool=ctx.pool, audit=ctx.audit,
+            )
+        if action == "show":
+            return _show_known_host(name=name, registry=ctx.registry)
+        return {"error": "invalid_action", "action": action,
+                "message": f"Unknown action {action!r}. Use: add show"}
 
-    @mcp.tool()
-    async def ssh_write_process(process_id: str, data: str) -> dict[str, Any]:  # type: ignore[return]
-        """Write data to a background process's stdin."""
-        return await ssh_write_process_fn(
-            process_id=process_id, data=data, session_manager=ctx.session_manager
-        )
+    # ── 8. ssh_server ────────────────────────────────────────────────────────
 
-    @mcp.tool()
-    async def ssh_kill_process(  # type: ignore[return]
-        process_id: str, signal: str = "SIGTERM"
-    ) -> dict[str, Any]:
-        """Send a signal to a background process."""
-        return await ssh_kill_process_fn(
-            process_id=process_id, session_manager=ctx.session_manager, signal=signal
-        )
+    @mcp.tool(structured_output=False)
+    def ssh_server(  # type: ignore[return]
+        action: str,
+        name: str | None = None,
+        host: str | None = None,
+        user: str | None = None,
+        auth_type: str | None = None,
+        port: int = 22,
+        key_path: str | None = None,
+        cert_path: str | None = None,
+        password_env: str | None = None,
+        jump_host: str | None = None,
+        host_key_policy: str | None = None,
+        default_cwd: str | None = None,
+        max_sessions: int | None = None,
+        keepalive_interval: int | None = None,
+        note: str | None = None,
+    ) -> Any:
+        """Manage the SSH server registry.
 
-    @mcp.tool()
-    def ssh_list_processes(server: str | None = None) -> dict[str, Any]:  # type: ignore[return]
-        """List tracked background processes, optionally filtered by server."""
-        return ssh_list_processes_fn(session_manager=ctx.session_manager, server=server)
-
-    @mcp.tool()
-    async def ssh_check_process(process_id: str) -> dict[str, Any]:  # type: ignore[return]
-        """Check liveness of a background process and return its status."""
-        return await ssh_check_process_fn(
-            process_id=process_id, session_manager=ctx.session_manager
-        )
-
-    # --- PTY tools (T3c) ---
-
-    @mcp.tool()
-    async def ssh_start_pty(  # type: ignore[return]
-        server: str,
-        command: str | None = None,
-        cols: int = 220,
-        rows: int = 50,
-        use_tmux: bool = False,
-    ) -> dict[str, Any]:
-        """Open a PTY session on a remote server."""
-        return await ssh_start_pty_fn(
-            server=server, session_manager=ctx.session_manager, audit=ctx.audit,
-            command=command, cols=cols, rows=rows, use_tmux=use_tmux,
-        )
-
-    @mcp.tool()
-    async def ssh_pty_read(  # type: ignore[return]
-        session_id: str, max_bytes: int = 65536
-    ) -> dict[str, Any]:
-        """Read buffered output from a PTY session."""
-        return await ssh_pty_read_fn(
-            session_id=session_id, session_manager=ctx.session_manager, max_bytes=max_bytes
-        )
-
-    @mcp.tool()
-    async def ssh_pty_write(session_id: str, data: str) -> dict[str, Any]:  # type: ignore[return]
-        """Write data to a PTY session (use \\r to submit a line)."""
-        return await ssh_pty_write_fn(
-            session_id=session_id, data=data, session_manager=ctx.session_manager
-        )
-
-    @mcp.tool()
-    async def ssh_pty_resize(  # type: ignore[return]
-        session_id: str, cols: int, rows: int
-    ) -> dict[str, Any]:
-        """Resize a PTY session."""
-        return await ssh_pty_resize_fn(
-            session_id=session_id, cols=cols, rows=rows,
-            session_manager=ctx.session_manager,
-        )
-
-    @mcp.tool()
-    async def ssh_pty_close(session_id: str) -> dict[str, Any]:  # type: ignore[return]
-        """Close a PTY session and clean up resources."""
-        return await ssh_pty_close_fn(
-            session_id=session_id, session_manager=ctx.session_manager, audit=ctx.audit
-        )
-
-    @mcp.tool()
-    async def ssh_pty_attach(session_id: str) -> dict[str, Any]:  # type: ignore[return]
-        """Attach to an existing tmux-backed PTY session."""
-        return await ssh_pty_attach_fn(
-            session_id=session_id, session_manager=ctx.session_manager
-        )
-
-    # --- SCP tools ---
-
-    @mcp.tool()
-    async def ssh_get(  # type: ignore[return]
-        server: str,
-        remote_path: str,
-        local_path: str,
-        recurse: bool = False,
-        preserve: bool = False,
-    ) -> dict[str, Any]:
-        """Download a file or directory from a remote server to a local path."""
-        return await ssh_get_fn(
-            server=server, remote_path=remote_path, local_path=local_path,
-            recurse=recurse, preserve=preserve,
-            registry=ctx.registry, pool=ctx.pool, audit=ctx.audit,
-        )
-
-    @mcp.tool()
-    async def ssh_put(  # type: ignore[return]
-        server: str,
-        local_path: str,
-        remote_path: str,
-        recurse: bool = False,
-        preserve: bool = False,
-    ) -> dict[str, Any]:
-        """Upload a file or directory from a local path to a remote server."""
-        return await ssh_put_fn(
-            server=server, local_path=local_path, remote_path=remote_path,
-            recurse=recurse, preserve=preserve,
-            registry=ctx.registry, pool=ctx.pool, audit=ctx.audit,
-        )
-
-    @mcp.tool()
-    async def ssh_transfer(  # type: ignore[return]
-        src_server: str,
-        src_path: str,
-        dst_server: str,
-        dst_path: str,
-        recurse: bool = False,
-        preserve: bool = False,
-    ) -> dict[str, Any]:
-        """Copy a file or directory from one remote server to another.
-
-        Streams data through memory — nothing is written to local disk.
-        Same-server copies run ``cp`` remotely. To move instead of copy,
-        follow up with ``ssh_exec`` to delete the source.
+        action="list"       — No required args. Returns all registered servers
+                              and their connection statuses.
+        action="register"   — name, host, user, auth_type required.
+                              auth_type: "key" | "cert" | "password" | "agent".
+                              key_path required for auth_type="key";
+                              password_env required for auth_type="password".
+        action="deregister" — name required. Removes the server config and
+                              closes any open connections.
         """
-        return await ssh_transfer_fn(
-            src_server=src_server, src_path=src_path,
-            dst_server=dst_server, dst_path=dst_path,
-            recurse=recurse, preserve=preserve,
-            registry=ctx.registry, pool=ctx.pool, audit=ctx.audit,
-        )
+        if action == "list":
+            return _list_servers(registry=ctx.registry, pool=ctx.pool)
+        if action == "register":
+            return _register(
+                name=name or "", host=host or "", user=user or "",
+                auth_type=auth_type or "",
+                registry=ctx.registry, audit=ctx.audit,
+                port=port, key_path=key_path, cert_path=cert_path,
+                password_env=password_env, jump_host=jump_host,
+                host_key_policy=host_key_policy, default_cwd=default_cwd,
+                max_sessions=max_sessions, keepalive_interval=keepalive_interval,
+                note=note,
+            )
+        if action == "deregister":
+            return _deregister(
+                name=name or "", registry=ctx.registry, pool=ctx.pool, audit=ctx.audit,
+            )
+        return {"error": "invalid_action", "action": action,
+                "message": f"Unknown action {action!r}. Use: list register deregister"}
+
+    # ── 9. ssh_scan_topology ─────────────────────────────────────────────────
 
     @mcp.tool()
-    async def ssh_sync(  # type: ignore[return]
-        src_server: str,
-        src_path: str,
-        dst_server: str,
-        dst_path: str,
-        delete: bool = False,
-        preserve: bool = False,
+    async def ssh_scan_topology(  # type: ignore[return]
+        include: list[str] | None = None,
+        exclude: list[str] | None = None,
+        probe_timeout: float = 5.0,
+        harvest_timeout: float = 15.0,
+        force: bool = False,
     ) -> dict[str, Any]:
-        """Sync files from one server to another, copying only changed files.
+        """Probe server-to-server reachability and cache the N×N matrix.
 
-        *src_path* may be a directory or a glob pattern (e.g. ``/data/*.csv``).
-
-        Same-server syncs use ``rsync`` if available, otherwise ``cp -u``.
-        Cross-server syncs compare file size and mtime via SFTP and copy only
-        what differs — works with Windows servers (no rsync dependency).
-
-        Set *delete=True* to remove destination files absent from the source.
-
-        Returns ``{copied, skipped, deleted, method}`` plus server/path info.
+        Opens a direct-tcpip channel from each source's own vantage to every
+        target's candidate addresses (registered host + harvested interface IPs).
+        Feeds ssh_jump(action="setup", target=...). Use include/exclude to bound
+        which servers are scanned.
         """
-        return await ssh_sync_fn(
-            src_server=src_server, src_path=src_path,
-            dst_server=dst_server, dst_path=dst_path,
-            delete=delete, preserve=preserve,
-            registry=ctx.registry, pool=ctx.pool, audit=ctx.audit,
+        return await _scan_topology(
+            registry=ctx.registry, pool=ctx.pool, state=ctx.state, audit=ctx.audit,
+            include=include, exclude=exclude,
+            probe_timeout=probe_timeout, harvest_timeout=harvest_timeout,
+            force=force,
         )
 
 
