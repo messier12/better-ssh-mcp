@@ -160,6 +160,7 @@ class ConnectionPool:
         # Connection slots are created lazily on first use so servers added
         # after construction are supported.
         self._entries: dict[str, _ConnectionEntry] = {}
+        self._pinned: set[str] = set()
 
     def _entry(self, name: str) -> _ConnectionEntry:
         """Return (creating if needed) the connection slot for *name*."""
@@ -215,8 +216,18 @@ class ConnectionPool:
         entry.status = ConnectionStatus.connected
         return conn
 
+    def pin(self, name: str) -> None:
+        """Mark *name*'s connection as pinned so ``close()`` skips it."""
+        self._pinned.add(name)
+
+    def unpin(self, name: str) -> None:
+        """Remove the pin on *name*'s connection."""
+        self._pinned.discard(name)
+
     async def close(self, name: str) -> None:
         """Close the connection to *name* if open."""
+        if name in self._pinned:
+            return
         if name not in self._entries:
             return
         entry = self._entries[name]

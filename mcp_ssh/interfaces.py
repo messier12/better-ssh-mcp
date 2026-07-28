@@ -11,6 +11,8 @@ from .models import (
     ConnectionStatus,
     ProcessOutput,
     ProcessRecord,
+    ProxyRecord,
+    ProxyType,
     PtyOutput,
     ServerConfig,
     SessionRecord,
@@ -34,6 +36,28 @@ class IConnectionPool(Protocol):
     async def close(self, name: str) -> None: ...
     async def close_all(self) -> None: ...
     def get_status(self, name: str) -> ConnectionStatus: ...
+    def pin(self, name: str) -> None: ...
+    def unpin(self, name: str) -> None: ...
+
+
+@runtime_checkable
+class IProxyManager(Protocol):
+    async def start_proxy(
+        self,
+        server: str,
+        proxy_type: ProxyType,
+        local_port: int,
+        local_host: str,
+        remote_host: str | None,
+        remote_port: int | None,
+        audit: IAuditLog,
+    ) -> ProxyRecord: ...
+
+    async def stop_proxy(self, proxy_id: str, audit: IAuditLog) -> ProxyRecord: ...
+
+    def list_proxies(self, server: str | None = None) -> list[ProxyRecord]: ...
+
+    async def close_all(self) -> None: ...
 
 
 @runtime_checkable

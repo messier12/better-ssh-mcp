@@ -313,10 +313,11 @@ def test_integration_list_processes_empty_for_unknown_server() -> None:
 # ---------------------------------------------------------------------------
 
 def test_server_registers_24_tools(tmp_path: Path) -> None:
-    """_register_tools creates exactly 9 tool registrations on the MCP app.
+    """_register_tools creates exactly 10 tool registrations on the MCP app.
 
     Tool count: ssh_exec, ssh_process, ssh_pty, ssh_files, ssh_jump,
-    ssh_discover, ssh_known_host, ssh_server, ssh_scan_topology = 9.
+    ssh_discover, ssh_known_host, ssh_server, ssh_scan_topology,
+    ssh_proxy = 10.
     """
     from mcp_ssh.server import AppContext, _register_tools
 
@@ -330,10 +331,11 @@ def test_server_registers_24_tools(tmp_path: Path) -> None:
         session_manager=AsyncMock(),
         state=MagicMock(),
         audit=MagicMock(),
+        proxy_manager=AsyncMock(),
     )
     _register_tools(mcp, ctx)
 
-    assert mcp.tool.call_count == 9
+    assert mcp.tool.call_count == 10
 
 
 # ---------------------------------------------------------------------------
@@ -417,6 +419,7 @@ async def test_server_shutdown_calls_close_all(tmp_path: Path) -> None:
         session_manager=AsyncMock(),
         state=MagicMock(),
         audit=audit,
+        proxy_manager=AsyncMock(),
     )
 
     # Simulate the shutdown coroutine directly
