@@ -7,11 +7,12 @@ This guide covers configuring, organizing, and managing multiple SSH servers wit
 1. [Configuration Basics](#configuration-basics)
 2. [Server Organization](#server-organization)
 3. [Jump Hosts (Bastion Hosts)](#jump-hosts-bastion-hosts)
-4. [Global vs Server-Level Defaults](#global-vs-server-level-defaults)
-5. [Dynamic Server Registration](#dynamic-server-registration)
-6. [Common Patterns](#common-patterns)
-7. [Credential Management](#credential-management)
-8. [Best Practices](#best-practices)
+4. [Topology Scanning & Auto-Discovery](#topology-scanning--auto-discovery)
+5. [Global vs Server-Level Defaults](#global-vs-server-level-defaults)
+6. [Dynamic Server Registration](#dynamic-server-registration)
+7. [Common Patterns](#common-patterns)
+8. [Credential Management](#credential-management)
+9. [Best Practices](#best-practices)
 
 ---
 
@@ -246,15 +247,15 @@ jump_host = "internal-bastion"  # 3-hop chain: external → internal → app
 
 **Note:** Circular jump-host chains are detected and rejected at config load time.
 
-### Spontaneous Jump Chains (`setup_jump`)
+### Spontaneous Jump Chains (`ssh_jump`)
 
 The static `jump_host` config above is ideal for permanent topology. When you
 need a jump route *on the fly* — without editing `servers.toml` or respecifying
-keys — use the `setup_jump` tool. It builds a chain out of **already-registered**
-servers, reusing each one's credentials:
+keys — use `ssh_jump`. It builds a chain out of **already-registered** servers,
+reusing each one's credentials:
 
 ```
-setup_jump(name="winali", chain=["alibaba_das", "windows"])
+ssh_jump(action="setup", name="winali", chain=["alibaba_das", "windows"])
 ```
 
 - `chain[0]` is the first hop (directly reachable); `chain[-1]` is the final
@@ -262,7 +263,7 @@ setup_jump(name="winali", chain=["alibaba_das", "windows"])
 - Credentials (user, key, port, host-key policy) are cloned from each named
   server — you never touch key paths.
 - The result works with **every** SSH tool: `ssh_exec(server="winali", …)`,
-  `ssh_start_pty(server="winali")`, `ssh_get(server="winali", …)`, etc.
+  `ssh_pty(action="start", server="winali")`, `ssh_files(action="get", server="winali", …)`, etc.
 
 **Address overrides.** A host can be reachable at different addresses depending
 on where you dial from (e.g. a WireGuard IP only routable from the prior hop).
@@ -270,7 +271,7 @@ Append `@host` or `@host:port` to override just the dial address for that hop
 while still reusing its credentials:
 
 ```
-setup_jump(name="winali", chain=["alibaba_das", "windows@11.11.0.4"])
+ssh_jump(action="setup", name="winali", chain=["alibaba_das", "windows@11.11.0.4"])
 ```
 
 **Lifetime.** Ephemeral by default — the chain lives in memory and disappears on
@@ -278,12 +279,90 @@ restart, keeping `servers.toml` clean. Pass `persist=True` to write real config
 entries instead. Remove a chain (alias + all its intermediate hops) with:
 
 ```
-teardown_jump(name="winali")
+ssh_jump(action="teardown", name="winali")
 ```
 
 Internally each hop becomes a server config (`_<name>_hop<i>` for intermediate
 hops) wired together with `jump_host`, so a chain of any depth reuses the same
 tunnel mechanism described above.
+
+---
+
+## Topology Scanning & Auto-Discovery
+
+Two tools help you stop hand-building jump chains once your fleet gets big
+enough that you don't want to enumerate every hop yourself.
+
+### `ssh_scan_topology` — map reachability between known servers
+
+`ssh_jump`'s manual `chain=` mode requires you to know the hops. `ssh_scan_topology`
+verifies the graph between servers you've **already registered**: for every
+ordered pair of registered servers (plus a synthetic `local` source), it opens a
+direct-tcpip channel from the source to each of the target's candidate
+addresses — its registered host plus any interface IPs harvested along the way
+— from the source's own network vantage. The result is a directed N×N
+reachability matrix, cached in the state store.
+
+```
+ssh_scan_topology()
+# or bound the scan:
+ssh_scan_topology(include=["bastion", "internal-api", "internal-db"])
+```
+
+Once cached, feed it straight into `ssh_jump`'s auto mode:
+
+```
+ssh_jump(action="setup", name="db-route", target="internal-db")
+```
+
+`ssh_jump(action="setup", target=...)` pathfinds the fewest-hop route to
+`internal-db` over the cached matrix (latency as tiebreaker), builds the chain,
+and verifies it with a real connect — tearing it back down if verification
+fails. Pass `max_age` (seconds) to reject a stale cache, or `force_rescan=True`
+to run a fresh `ssh_scan_topology` first.
+
+**When to use:** you have a handful of named servers and want the agent to
+find (and keep re-verifying) the shortest path between them, instead of you
+hard-coding `chain=[...]` by hand.
+
+### `ssh_discover` — recursively find hosts you haven't named yet
+
+`ssh_scan_topology` only ever looks at servers you've already registered.
+`ssh_discover` is the inverse: starting from a seed frontier (by default,
+`local` plus your already-connected servers), it follows each host's own
+breadcrumbs — `known_hosts`, ARP cache, ssh config, shell history — to find
+candidate neighbors, tunnels from the center to probe and connect to them with
+the keys you supply, and auto-registers every confirmed host as an ephemeral
+server (`disc-<fp8>`) reachable through its discoverer. It never scans address
+ranges; it only follows what a host already knows about its neighbors.
+
+```
+ssh_discover(action="start", seeds=["bastion"], keys=["~/.ssh/fleet_ed25519"])
+```
+
+Useful knobs:
+- `harvest_keys=True` — also try unencrypted keys read off each host as you go
+  (encrypted keys are reported, never used)
+- `max_depth`, `max_nodes`, `timeout`, `concurrency` — bound how far and how
+  fast the crawl goes
+- `persist=True` — write discovered hosts to `servers.toml` instead of keeping
+  them ephemeral
+
+Discovery is inherently TOFU (trust-on-first-use) regardless of your global
+`host_key_policy` — the first connect to an unnamed host is what captures the
+fingerprint used to deduplicate it. This is an accepted tradeoff for the
+own-fleet use case; don't run `ssh_discover` against infrastructure you don't
+control.
+
+Every discovered host is tagged with a session id. Remove the whole batch with:
+
+```
+ssh_discover(action="teardown", session="disc-7f3a1c")
+```
+
+**When to use:** you've spun up a batch of servers that all share one SSH key
+and don't want to name each one to the agent by hand — `ssh_discover` maps and
+registers the reachable set for you.
 
 ---
 
@@ -361,7 +440,7 @@ When you execute `ssh_exec` on `staging-api`, the command runs with `APP_ENV=sta
 
 ## Dynamic Server Registration
 
-In addition to `servers.toml`, you can register servers programmatically using `ssh_register_server`.
+In addition to `servers.toml`, you can register servers programmatically using `ssh_server(action="register", ...)`.
 
 ### Use Cases
 
@@ -373,15 +452,22 @@ In addition to `servers.toml`, you can register servers programmatically using `
 
 ```python
 # Register a server dynamically
-ssh_register_server(
+ssh_server(
+    action="register",
     name="temp-test-server",
     host="192.0.2.100",
     port=22,
     user="testuser",
     auth_type="key",
     key_path="~/.ssh/test_key",
-    host_key_policy="accept_new"
+    host_key_policy="accept_new",
 )
+
+# List all servers
+ssh_server(action="list")
+
+# Remove a server
+ssh_server(action="deregister", name="temp-test-server")
 ```
 
 ### Audit Trail
@@ -562,6 +648,25 @@ Start your SSH agent and add keys:
 eval $(ssh-agent)
 ssh-add ~/.ssh/prod_key
 # Now connections to prod will use the agent
+```
+
+### Host Key Management
+
+Alongside credentials, better-ssh-mcp gives you `ssh_known_host` for managing
+the `known_hosts_file` itself, so you don't have to shell out to `ssh-keyscan`:
+
+- `ssh_known_host(action="add", name=...)` — connects to a registered server,
+  captures its negotiated host key, and appends it to `known_hosts_file`
+  (skipped if already present). Handy for pre-populating `known_hosts` before
+  switching a server to `host_key_policy = "strict"`.
+- `ssh_known_host(action="show", name=...)` — reads back the stored key(s) for
+  a server's host, reporting algorithm and fingerprint. Useful for confirming
+  what's pinned when debugging a "host key verification failed" error (see
+  [Troubleshooting](#host-key-verification-fails)).
+
+```
+ssh_known_host(action="add", name="prod-db")
+ssh_known_host(action="show", name="prod-db")
 ```
 
 ### Vault / Secrets Management
