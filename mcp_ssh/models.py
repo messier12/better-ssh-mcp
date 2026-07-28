@@ -92,6 +92,23 @@ class SessionRecord(BaseModel):
     status:       ProcessStatus = ProcessStatus.unknown
 
 
+class ProxyType(str, Enum):  # noqa: UP042
+    local  = "local"
+    socks5 = "socks5"
+
+
+class ProxyRecord(BaseModel):
+    id:          str
+    server:      str
+    type:        ProxyType
+    local_host:  str
+    local_port:  int
+    remote_host: str | None = None   # None for socks5
+    remote_port: int | None = None   # None for socks5
+    started_at:  datetime
+    status:      str = "active"      # "active" | "stopped"
+
+
 class ProcessOutput(BaseModel):
     output:     str
     running:    bool
@@ -112,6 +129,7 @@ class AuditEvent(BaseModel):
     command:    str | None = None
     process_id: str | None = None
     session_id: str | None = None
+    proxy_id:   str | None = None
     outcome:    str
     detail:     dict[str, object] = Field(default_factory=dict)
     # IMPORTANT: passwords, passphrases, env var values must NEVER appear here

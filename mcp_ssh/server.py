@@ -1,6 +1,6 @@
 """MCP server entrypoint for mcp-ssh (T4).
 
-Wires together all components and registers 9 consolidated MCP tools.
+Wires together all components and registers 10 consolidated MCP tools.
 """
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ def _build_app() -> tuple[Any, AppContext]:
     from .audit import AuditLog
     from .config import resolve_config_path
     from .pool import ConnectionPool
+    from .proxy import ProxyManager
     from .registry import Registry
     from .session import SessionManager
     from .state import StateStore
@@ -52,12 +53,15 @@ def _build_app() -> tuple[Any, AppContext]:
         registry=registry,  # type: ignore[arg-type]
     )
 
+    proxy_manager = ProxyManager(pool=pool)
+
     ctx = AppContext(
         registry=registry,
         pool=pool,
         session_manager=session_manager,
         state=state,
         audit=audit,
+        proxy_manager=proxy_manager,
     )
 
     @asynccontextmanager
@@ -76,6 +80,7 @@ def _build_app() -> tuple[Any, AppContext]:
         finally:
             watch_task.cancel()
             await asyncio.gather(watch_task, return_exceptions=True)
+            await ctx.proxy_manager.close_all()
             await ctx.pool.close_all()
             ctx.audit.close()
 
@@ -95,16 +100,18 @@ class AppContext:
         session_manager: Any,
         state: Any,
         audit: Any,
+        proxy_manager: Any,
     ) -> None:
         self.registry = registry
         self.pool = pool
         self.session_manager = session_manager
         self.state = state
         self.audit = audit
+        self.proxy_manager = proxy_manager
 
 
 def _register_tools(mcp: Any, ctx: AppContext) -> None:
-    """Register the 9 consolidated SSH MCP tools on the FastMCP app."""
+    """Register the 10 consolidated SSH MCP tools on the FastMCP app."""
     from .tools.exec_tools import (
         ssh_check_process as _check_process,
     )
@@ -126,6 +133,7 @@ def _register_tools(mcp: Any, ctx: AppContext) -> None:
     from .tools.exec_tools import (
         ssh_write_process as _write_process,
     )
+    from .tools.proxy_tools import ssh_proxy as _ssh_proxy_fn
     from .tools.pty_tools import (
         ssh_pty_attach as _pty_attach,
     )
@@ -580,6 +588,47 @@ def _register_tools(mcp: Any, ctx: AppContext) -> None:
             include=include, exclude=exclude,
             probe_timeout=probe_timeout, harvest_timeout=harvest_timeout,
             force=force,
+        )
+
+    # ── 10. ssh_proxy ────────────────────────────────────────────────────────
+
+    @mcp.tool()
+    async def ssh_proxy(  # type: ignore[return]
+        action: str,
+        server: str | None = None,
+        type: str | None = None,
+        local_port: int | None = None,
+        local_host: str = "127.0.0.1",
+        remote_host: str | None = None,
+        remote_port: int | None = None,
+        proxy_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Open, close, or list SSH port-forward / SOCKS5 proxies.
+
+        action="start"  — server, type, local_port required.
+                          type="local": also requires remote_host, remote_port.
+                            Forwards localhost:local_port → remote_host:remote_port
+                            through server (ssh -L equivalent).
+                          type="socks5": dynamic SOCKS5 proxy on local_port
+                            through server (ssh -D equivalent). Use with
+                            curl --proxy socks5h://localhost:<port>.
+                          local_host defaults to "127.0.0.1".
+                          Returns {proxy_id, server, type, local_host, local_port,
+                                   remote_host, remote_port, started_at}.
+        action="stop"   — proxy_id required. Closes listener, unpins connection.
+        action="list"   — server optional filter. Returns {proxies: [...]}.
+        """
+        return await _ssh_proxy_fn(
+            action=action,
+            proxy_manager=ctx.proxy_manager,
+            audit=ctx.audit,
+            server=server,
+            proxy_type_str=type,
+            local_port=local_port,
+            local_host=local_host,
+            remote_host=remote_host,
+            remote_port=remote_port,
+            proxy_id=proxy_id,
         )
 
 
