@@ -92,45 +92,19 @@ Each audit event is a JSON object with the following fields:
 
 ## Tool Features
 
-### Registry Tools
-
-#### `ssh_register_server`
-**Register a new SSH server to the server registry.**
-
-Adds a server configuration dynamically (without editing `servers.toml`).
-
-**When to use:**
-- Add servers programmatically
-- Change server settings at runtime
-- Test connections to new hosts
-
-**Audit entry:**
-```json
-{
-  "tool": "ssh_register_server",
-  "server": "newhost",
-  "outcome": "success",
-  "detail": {
-    "host": "192.0.2.50",
-    "user": "alice",
-    "auth_type": "key"
-  }
-}
-```
+Tools are organized into 9 consolidated tools. Related operations share a single tool name and are dispatched by an `action` parameter.
 
 ---
 
-### Execution Tools
-
-#### `ssh_exec`
+### `ssh_exec`
 **Run a command on a remote server and wait for output.**
 
-Executes a single command, waits for it to complete, and returns stdout/stderr/exit code. Non-interactive; useful for one-off commands.
+Non-interactive; returns stdout + stderr + exit code in one call.
+Pass `timeout=None` to wait indefinitely (logs a warning).
 
 **When to use:**
 - Quick remote commands (`ls`, `df`, `uname`)
 - Scripted operations that need immediate feedback
-- Checking server state
 
 **Audit entry:**
 ```json
@@ -138,43 +112,33 @@ Executes a single command, waits for it to complete, and returns stdout/stderr/e
   "tool": "ssh_exec",
   "server": "webserver",
   "command": "df -h",
-  "outcome": "success",
-  "detail": {
-    "exit_code": 0,
-    "stdout_lines": 5,
-    "duration_seconds": 1.2
-  }
-}
-```
-
-**Example failure audit:**
-```json
-{
-  "tool": "ssh_exec",
-  "server": "prod",
-  "command": "cat /etc/shadow",
-  "outcome": "failure",
-  "detail": {
-    "error": "permission denied",
-    "exit_code": 1
-  }
+  "outcome": "completed",
+  "detail": { "exit_code": 0 }
 }
 ```
 
 ---
 
-#### `ssh_exec_stream`
-**Start a long-running background process.**
+### `ssh_process`
+**Background process lifecycle (nohup-backed).**
 
-Launches a command in the background and returns a process ID. Useful for long-running tasks (deployments, builds, etc.). Output is captured to a log file on the remote system.
+| action | Required params | Returns |
+|---|---|---|
+| `start` | `server`, `command` | `{process_id, server, command}` |
+| `read` | `process_id` | `{output, next_offset, running, exit_code, remote_pid, server}` |
+| `write` | `process_id`, `data` | always an error — nohup has no stdin |
+| `kill` | `process_id` | `{killed, signal}` |
+| `list` | — | `{processes: [...]}` |
+| `check` | `process_id` | `{output, running, exit_code, remote_pid, server}` |
+
+Pass `offset=next_offset` from a previous `read` to stream output incrementally.
+Allowed signals for `kill`: `SIGTERM SIGKILL SIGINT SIGHUP SIGQUIT SIGUSR1 SIGUSR2`.
 
 **When to use:**
-- Build/compile operations
-- Database migrations
-- Long-running scripts
-- Operations that don't need interactive input
+- Build/compile operations, database migrations, long-running scripts
+- Anything that doesn't need interactive input
 
-**Audit entry:**
+**Audit entry (start):**
 ```json
 {
   "tool": "ssh_exec_stream",
@@ -184,246 +148,204 @@ Launches a command in the background and returns a process ID. Useful for long-r
   "outcome": "success",
   "detail": {
     "remote_pid": 12345,
-    "log_file": "/tmp/mcp-ssh-logs/proc-abc123.log",
-    "exit_file": "/tmp/mcp-ssh-logs/proc-abc123.exit"
+    "log_file": "/tmp/mcp-ssh-logs/proc-abc123.log"
   }
 }
 ```
 
 ---
 
-### PTY Tools
+### `ssh_pty`
+**Interactive PTY session lifecycle.**
 
-PTY (pseudo-terminal) tools provide full interactive terminal control. Use these when you need terminal features (cursor control, colors, interactive prompts).
+| action | Required params | Notes |
+|---|---|---|
+| `start` | `server` | `command`, `cols`, `rows`, `use_tmux` optional |
+| `read` | `session_id` | `max_bytes` optional |
+| `write` | `session_id`, `data` | Use `\r` not `\n` to submit a line |
+| `resize` | `session_id`, `cols`, `rows` | Redraw full-screen TUIs after resize |
+| `close` | `session_id` | Cleans up local channel; tmux window stays alive on remote |
+| `attach` | `session_id` | tmux-backed sessions only |
 
-#### `ssh_start_pty`
-**Open an interactive PTY session.**
-
-Creates a pseudo-terminal on the remote system. Can run a command or drop to a shell. Supports tmux-backed sessions for persistence.
+With `use_tmux=True` the session survives MCP reconnects — resume with `attach`.
 
 **When to use:**
-- Interactive shells
-- Terminal-based tools (vim, htop, etc.)
-- Commands that need a TTY (sudo, expect, etc.)
+- Interactive shells, vim, htop
+- Commands that require a TTY (`sudo`, `expect`)
 - Persistent sessions across API calls
 
-**Audit entry:**
+**Audit entry (start):**
 ```json
 {
   "tool": "ssh_start_pty",
   "server": "devbox",
   "command": "/bin/bash",
   "session_id": "pty-xyz789",
-  "outcome": "success",
-  "detail": {
-    "use_tmux": true,
-    "tmux_window": "mcp-ssh-pty-xyz789",
-    "size": "220x50"
-  }
+  "outcome": "started",
+  "detail": { "use_tmux": true, "cols": 220, "rows": 50 }
 }
 ```
 
-#### `ssh_pty_write`
-**Send input to a PTY session.**
+---
 
-Sends keyboard input to a running PTY. Equivalent to typing into a terminal.
+### `ssh_files`
+**File transfer between local and remote servers.**
 
-**When to use:**
-- Type commands into a shell
-- Answer interactive prompts
-- Send CTRL+C, CTRL+D, etc.
+| action | Required params | Notes |
+|---|---|---|
+| `get` | `server`, `remote_path`, `local_path` | SCP download |
+| `put` | `server`, `local_path`, `remote_path` | SCP upload |
+| `transfer` | `src_server`, `src_path`, `dst_server`, `dst_path` | Server-to-server via memory; same-server uses `cp` |
+| `sync` | `src_server`, `src_path`, `dst_server`, `dst_path` | Copies only changed files; `src_path` may be a glob |
 
-**Audit entry:**
+All actions accept `recurse` and `preserve`. `sync` also accepts `delete=True`
+to remove destination files absent from the source.
+Cross-server `sync` uses SFTP diff — no rsync dependency (works against Windows).
+
+**Audit entry (sync):**
 ```json
 {
-  "tool": "ssh_pty_write",
-  "server": "devbox",
-  "session_id": "pty-xyz789",
-  "outcome": "success",
-  "detail": {
-    "bytes_written": 24,
-    "text_preview": "ls -la /home\r"
-  }
+  "tool": "ssh_sync",
+  "server": "db-primary",
+  "outcome": "ok",
+  "detail": { "copied": 3, "skipped": 41, "deleted": 0 }
 }
 ```
 
-#### `ssh_pty_read`
-**Read output from a PTY session.**
+---
 
-Reads buffered output from the PTY. Non-blocking.
+### `ssh_jump`
+**Spontaneous multi-hop SSH jump chains.**
 
-**Audit entry:**
+| action | Required params | Notes |
+|---|---|---|
+| `setup` | `name` + `chain` or `target` | Manual or auto-pathfound |
+| `teardown` | `name` | Removes alias + all hop entries |
+
+**Manual** (`chain=[server1, server2, ...]`): reuses each server's registered
+credentials; `chain[0]` is the first hop, `chain[-1]` the final target exposed
+as `name`. Append `@host` or `@host:port` to override a hop's dial address.
+
+**Auto** (`target=<server>`): pathfinds over the cached reachability matrix
+from `ssh_scan_topology`. Pass `max_age` to reject a stale cache or
+`force_rescan=True` to scan fresh first. Verifies with a real connect and
+tears down on failure.
+
+Ephemeral by default; `persist=True` writes to `servers.toml`. Use `name`
+with any SSH tool after setup.
+
+**Audit entry (setup):**
 ```json
 {
-  "tool": "ssh_pty_read",
-  "server": "devbox",
-  "session_id": "pty-xyz789",
-  "outcome": "success",
+  "tool": "setup_jump",
+  "server": "winali",
+  "outcome": "created",
   "detail": {
-    "bytes_read": 1024,
-    "output_preview": "$ ls -la /home\ndrwxr-xr-x 4 root..."
-  }
-}
-```
-
-#### `ssh_pty_close`
-**Close a PTY session.**
-
-Terminates the PTY and cleans up resources. If tmux-backed, the session persists on the remote until explicitly killed.
-
-**Audit entry:**
-```json
-{
-  "tool": "ssh_pty_close",
-  "server": "devbox",
-  "session_id": "pty-xyz789",
-  "outcome": "success",
-  "detail": {
-    "exit_code": 0
+    "persist": false,
+    "hops": ["jumpuser@alibaba.example.com:22", "admin@11.11.0.4:22"]
   }
 }
 ```
 
 ---
 
-### Process Management Tools
+### `ssh_discover`
+**Recursive SSH host auto-discovery.**
 
-#### `ssh_list_processes`
-**List all background processes started by better-ssh-mcp.**
+| action | Required params | Notes |
+|---|---|---|
+| `start` | — | `seeds`, `keys`, options optional |
+| `teardown` | `session` | Removes all hosts registered by that session |
 
-Returns all running and exited processes (local state only — does not query remote).
+Starting from a seed frontier (default: local + connected servers), harvests
+each host's `known_hosts`, ARP cache, ssh config, and shell history for
+candidate neighbors, probes them with the supplied `keys`, and auto-registers
+every confirmed host as an ephemeral server reachable through its discoverer.
+Inherently TOFU. Set `harvest_keys=True` to fold in unencrypted keys found on
+hosts (encrypted keys are reported, not used). Bounded by `max_depth`,
+`max_nodes`, `timeout`, and `concurrency`.
 
-**Audit entry:**
+**When to use:**
+- Map and register an entire fleet sharing one SSH key
+- Onboard freshly-provisioned cloud servers without knowing their addresses
+
+**Audit entry (start):**
 ```json
 {
-  "tool": "ssh_list_processes",
+  "tool": "ssh_discover",
   "outcome": "success",
-  "detail": {
-    "processes": [
-      {
-        "id": "proc-abc123",
-        "server": "buildserver",
-        "command": "make release",
-        "status": "running"
-      },
-      {
-        "id": "proc-xyz789",
-        "server": "webserver",
-        "command": "tail -f app.log",
-        "status": "exited"
-      }
-    ]
-  }
-}
-```
-
-#### `ssh_check_process`
-**Check the status of a background process.**
-
-Queries the process state and retrieves available output so far.
-
-**Audit entry:**
-```json
-{
-  "tool": "ssh_check_process",
-  "process_id": "proc-abc123",
-  "server": "buildserver",
-  "outcome": "success",
-  "detail": {
-    "status": "running",
-    "remote_pid": 12345,
-    "stdout_lines": 42,
-    "duration_seconds": 35.5
-  }
-}
-```
-
-**Example: process completed**
-```json
-{
-  "tool": "ssh_check_process",
-  "process_id": "proc-abc123",
-  "server": "buildserver",
-  "outcome": "success",
-  "detail": {
-    "status": "exited",
-    "exit_code": 0,
-    "stdout_lines": 127,
-    "duration_seconds": 125.3
-  }
-}
-```
-
-#### `ssh_kill_process`
-**Send a signal to a background process.**
-
-Sends a Unix signal (SIGTERM, SIGKILL, etc.) to the remote process.
-
-**Audit entry:**
-```json
-{
-  "tool": "ssh_kill_process",
-  "process_id": "proc-abc123",
-  "server": "buildserver",
-  "outcome": "success",
-  "detail": {
-    "signal": "SIGTERM",
-    "remote_pid": 12345
-  }
+  "detail": { "session": "disc-7f3a1c", "discovered": 5, "truncated": false }
 }
 ```
 
 ---
 
-### File Transfer Tools
+### `ssh_known_host`
+**Known-host key management.**
 
-#### `ssh_get`
-**Download a file or directory from a remote server (SCP).**
+| action | Required params | Notes |
+|---|---|---|
+| `add` | `name` | Connects, captures key, appends to `known_hosts_file` |
+| `show` | `name` | Returns algorithm + fingerprint of stored key. Read-only. |
 
-Transfers files from remote to local using SCP. Supports recursive directory transfer.
+Use `add` to pre-populate `known_hosts` for `strict` policy without an
+out-of-band `ssh-keyscan`, or to pin a key the first time under TOFU.
 
-**When to use:**
-- Retrieve logs, artifacts, config files
-- Backup remote data
-- Extract results from remote operations
-
-**Audit entry:**
+**Audit entry (add):**
 ```json
 {
-  "tool": "ssh_get",
-  "server": "webserver",
-  "outcome": "success",
-  "detail": {
-    "remote_path": "/var/log/nginx/access.log",
-    "local_path": "/home/user/downloads/access.log",
-    "bytes_transferred": 4096000,
-    "is_dir": false
-  }
+  "tool": "ssh_add_known_host",
+  "server": "prod-db",
+  "outcome": "key_recorded",
+  "detail": { "host": "db.prod.example.com", "already_present": false }
 }
 ```
 
-#### `ssh_put`
-**Upload a file or directory to a remote server (SCP).**
+---
 
-Transfers files from local to remote using SCP. Supports recursive directory transfer.
+### `ssh_server`
+**Server registry management.**
+
+| action | Required params | Notes |
+|---|---|---|
+| `list` | — | Returns compact plain-text table. Not audited. |
+| `register` | `name`, `host`, `user`, `auth_type` | Adds server dynamically without editing `servers.toml` |
+| `deregister` | `name` | Removes config; non-fatal `warning` if active sessions exist |
+
+`auth_type`: `agent` `key` `password` `cert` `sk` `keyboard_interactive` `gssapi`.
+`key_path` required for `key`; `password_env` required for `password`.
+
+**Audit entry (register):**
+```json
+{
+  "tool": "ssh_register_server",
+  "server": "newhost",
+  "outcome": "success",
+  "detail": { "host": "192.0.2.50", "user": "alice", "auth_type": "key" }
+}
+```
+
+---
+
+### `ssh_scan_topology`
+**Probe server-to-server reachability and cache the N×N matrix.**
+
+For every ordered pair of registered servers (plus a synthetic `local` source),
+opens a direct-tcpip channel from the source to each target's candidate
+addresses (registered host + harvested interface IPs) from the source's own
+network vantage. The cached result feeds `ssh_jump(action="setup", target=...)`
+pathfinding. Use `include`/`exclude` to bound which servers are scanned.
 
 **When to use:**
-- Deploy configuration files
-- Upload scripts, artifacts, packages
-- Provision remote systems
+- Refresh the reachability picture before an auto-chained `ssh_jump`
+- Discover vantage-specific addresses only visible from a particular hop
 
 **Audit entry:**
 ```json
 {
-  "tool": "ssh_put",
-  "server": "prod",
-  "outcome": "success",
-  "detail": {
-    "local_path": "/home/user/config.toml",
-    "remote_path": "/etc/app/config.toml",
-    "bytes_transferred": 2048,
-    "is_dir": false
-  }
+  "tool": "ssh_scan_topology",
+  "outcome": "scanned",
+  "detail": { "nodes": 6, "edges": 14 }
 }
 ```
 
@@ -525,23 +447,23 @@ While the command is logged, the secret value in the HTTP header is visible. To 
 Audit trail for a typical CI/CD workflow:
 
 ```json
-// Step 1: Check if server is up
-{"ts": "2026-04-11T10:00:00Z", "tool": "ssh_exec", "server": "prod", "command": "echo ok", "outcome": "success"}
+// Step 1: Check if server is up  →  ssh_exec
+{"ts": "2026-04-11T10:00:00Z", "tool": "ssh_exec", "server": "prod", "command": "echo ok", "outcome": "completed", "detail": {"exit_code": 0}}
 
-// Step 2: Upload new artifact
-{"ts": "2026-04-11T10:00:05Z", "tool": "ssh_put", "server": "prod", "detail": {"remote_path": "/opt/app/v1.2.3.tar.gz", "bytes_transferred": 50000000}}
+// Step 2: Upload new artifact  →  ssh_files(action="put")
+{"ts": "2026-04-11T10:00:05Z", "tool": "ssh_put", "server": "prod", "outcome": "ok", "detail": {"remote_path": "/opt/app/v1.2.3.tar.gz", "bytes_transferred": 50000000}}
 
-// Step 3: Extract and deploy (background)
-{"ts": "2026-04-11T10:00:10Z", "tool": "ssh_exec_stream", "server": "prod", "command": "cd /opt/app && tar xzf v1.2.3.tar.gz && ./deploy.sh", "process_id": "proc-abc123"}
+// Step 3: Extract and deploy (background)  →  ssh_process(action="start")
+{"ts": "2026-04-11T10:00:10Z", "tool": "ssh_exec_stream", "server": "prod", "command": "cd /opt/app && tar xzf v1.2.3.tar.gz && ./deploy.sh", "process_id": "proc-abc123", "outcome": "success"}
 
-// Step 4: Poll for completion
-{"ts": "2026-04-11T10:05:00Z", "tool": "ssh_check_process", "process_id": "proc-abc123", "detail": {"status": "exited", "exit_code": 0}}
+// Step 4: Poll for completion  →  ssh_process(action="check")
+{"ts": "2026-04-11T10:05:00Z", "tool": "ssh_check_process", "process_id": "proc-abc123", "outcome": "success", "detail": {"status": "exited", "exit_code": 0}}
 
-// Step 5: Verify (interactive)
-{"ts": "2026-04-11T10:05:05Z", "tool": "ssh_start_pty", "server": "prod", "session_id": "pty-xyz789"}
-{"ts": "2026-04-11T10:05:10Z", "tool": "ssh_pty_write", "session_id": "pty-xyz789", "command": "curl http://localhost:8080/health"}
-{"ts": "2026-04-11T10:05:15Z", "tool": "ssh_pty_read", "session_id": "pty-xyz789"}
-{"ts": "2026-04-11T10:05:20Z", "tool": "ssh_pty_close", "session_id": "pty-xyz789"}
+// Step 5: Verify (interactive)  →  ssh_pty(action=start/write/read/close)
+{"ts": "2026-04-11T10:05:05Z", "tool": "ssh_start_pty", "server": "prod", "session_id": "pty-xyz789", "outcome": "started"}
+{"ts": "2026-04-11T10:05:10Z", "tool": "ssh_pty_write", "session_id": "pty-xyz789", "outcome": "success"}
+{"ts": "2026-04-11T10:05:15Z", "tool": "ssh_pty_read", "session_id": "pty-xyz789", "outcome": "success"}
+{"ts": "2026-04-11T10:05:20Z", "tool": "ssh_pty_close", "session_id": "pty-xyz789", "outcome": "closed"}
 ```
 
 ---

@@ -8,11 +8,13 @@ An intelligent SSH MCP (Model Context Protocol) server that exposes SSH operatio
 
 - **Non-interactive execution** — Run single commands and capture output
 - **Background processes** — Start long-running tasks with async I/O
-- **PTY sessions** — Full terminal control with interactive shells
-- **File transfer** — SCP-based `ssh_get` and `ssh_put` tools
-- **Process management** — List, check, and signal background processes
+- **PTY sessions** — Full terminal control with interactive shells, including tmux-backed sessions you can detach from and re-attach to
+- **File transfer** — SCP-based `ssh_get` / `ssh_put`, plus server-to-server `ssh_transfer` and diff-aware `ssh_sync`
+- **Process management** — List, check, signal, and read/write stdin of background processes
+- **Spontaneous jump chains** — Build a multi-hop SSH tunnel on the fly (`setup_jump`) out of already-registered servers, without editing `servers.toml`
+- **Topology scanning & auto-discovery** — Map server-to-server reachability (`ssh_scan_topology`) and recursively crawl a fleet's own `known_hosts`/ARP/ssh-config breadcrumbs to auto-register every host it can reach (`ssh_discover`)
 - **Audit logging** — All operations logged to JSONL for compliance
-- **Host key verification** — Multiple policies (TOFU, strict, accept_new)
+- **Host key verification** — Multiple policies (TOFU, strict, accept_new), plus tools to record and inspect known-host entries
 - **Connection pooling** — Efficient connection reuse with configurable limits
 - **Server registry** — TOML-based server configuration with defaults
 - **Secure authentication** — Key-based, agent, password, certificate, and GSSAPI support
@@ -133,22 +135,21 @@ make check
 
 ## 📋 Available Tools
 
-All tools are exposed to Claude and other MCP clients:
+All tools are exposed to Claude and other MCP clients. **9 tools total** — related operations are grouped under a single tool with an `action` parameter.
 
 **See [FEATURES.md](FEATURES.md) for detailed documentation on each tool, audit logging, and filtering examples.**
 
-- `ssh_register_server` — Add a new server to the registry
-- `ssh_exec` — Run a command and wait for output
-- `ssh_exec_stream` — Start a long-running background process
-- `ssh_start_pty` — Open an interactive PTY session
-- `ssh_pty_write` — Send input to a PTY
-- `ssh_pty_read` — Read output from a PTY
-- `ssh_pty_close` — Close a PTY session
-- `ssh_list_processes` — List background processes
-- `ssh_check_process` — Check process status
-- `ssh_kill_process` — Send signal to a process
-- `ssh_get` — Download file/directory (SCP)
-- `ssh_put` — Upload file/directory (SCP)
+| Tool | Actions | Description |
+|---|---|---|
+| `ssh_exec` | — | Run a command and wait for output |
+| `ssh_process` | `start` `read` `write` `kill` `list` `check` | Background process lifecycle |
+| `ssh_pty` | `start` `read` `write` `resize` `close` `attach` | Interactive PTY sessions |
+| `ssh_files` | `get` `put` `transfer` `sync` | File transfer between local and remote |
+| `ssh_jump` | `setup` `teardown` | Spontaneous multi-hop jump chains |
+| `ssh_discover` | `start` `teardown` | Recursive SSH host auto-discovery |
+| `ssh_known_host` | `add` `show` | Known-host key management |
+| `ssh_server` | `list` `register` `deregister` | Server registry management |
+| `ssh_scan_topology` | — | Probe server-to-server reachability matrix |
 
 ## 🔐 Security
 
